@@ -1,0 +1,102 @@
+/**
+ * Helpers compartilhados pelos scrapers do VendTEF/VendPago.
+ */
+
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { existsSync } from 'node:fs';
+
+export const SESSION_PATH = './tmp/vendtef-session.json';
+
+export async function launchBrowser(headless = process.env.HEADLESS !== 'false'): Promise<Browser> {
+  return chromium.launch({ headless });
+}
+
+export async function newAuthedContext(browser: Browser): Promise<BrowserContext> {
+  if (!existsSync(SESSION_PATH)) {
+    console.error('✗ session não encontrada — rode `npm run scrape:login` primeiro.');
+    process.exit(1);
+  }
+  const ctx = await browser.newContext({
+    viewport: { width: 1366, height: 768 },
+    locale: 'pt-BR',
+    storageState: SESSION_PATH,
+  });
+  // Polyfill: tsx/esbuild emite __name() em arrows compiladas — não existe no browser
+  await ctx.addInitScript(() => {
+    // @ts-expect-error globais pro page.evaluate
+    if (typeof window.__name === 'undefined') window.__name = (fn) => fn;
+  });
+  return ctx;
+}
+
+/** Faz SSO num portal externo (VendTEF/PayBlu) via link com token no ERP. */
+export async function ensurePortalSSO(ctx: BrowserContext, portal: 'vendtef' | 'payblu') {
+  const page = await ctx.newPage();
+  try {
+    await page.goto('https://www.erpvending.com.br/', { waitUntil: 'domcontentloaded' });
+    await dismissModals(page);
+    const label = portal === 'vendtef' ? 'VendTEF' : 'PayBlu';
+    const link = page.locator(`a:has-text("${label}")`).first();
+    const href = await link.getAttribute('href');
+    if (!href || !href.includes('token/')) {
+      throw new Error(`link SSO de ${portal} não encontrado no ERP — sessão expirou?`);
+    }
+    await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+  } finally {
+    await page.close();
+  }
+}
+
+export async function dismissModals(page: Page) {
+  const selectors = [
+    '.modal:visible button:has-text("Fechar")',
+    '[role="dialog"]:visible button:has-text("Fechar")',
+    '.modal:visible .close',
+    'button[data-dismiss="modal"]:visible',
+  ];
+  for (const sel of selectors) {
+    try {
+      const el = page.locator(sel).first();
+      if (await el.isVisible({ timeout: 300 })) {
+        await el.click({ force: true });
+        await page.waitForTimeout(300);
+        return;
+      }
+    } catch {
+      /* ok */
+    }
+  }
+}
+
+export interface CapturedTable {
+  headers: string[];
+  rows: string[][];
+}
+
+/** Extrai todas as tabelas visíveis da página com headers + rows. */
+export async function captureTables(page: Page): Promise<CapturedTable[]> {
+  return page.evaluate(() => {
+    const cleanText = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+    return Array.from(document.querySelectorAll('table'))
+      .filter((t) => (t as HTMLElement).offsetParent !== null)
+      .map((t) => {
+        const headerCells = t.querySelectorAll('thead th, thead td');
+        const headers = headerCells.length
+          ? Array.from(headerCells).map(cleanText)
+          : (() => {
+              const firstRow = t.querySelector('tr');
+              return firstRow ? Array.from(firstRow.children).map(cleanText) : [];
+            })();
+        const rows = Array.from(t.querySelectorAll('tbody tr')).map((r) =>
+          Array.from(r.children).map(cleanText),
+        );
+        return { headers, rows };
+      })
+      .filter((t) => t.rows.length > 0);
+  });
+}
+
+export function isOnLoginPage(page: Page): boolean {
+  return page.url().includes('/auth/login');
+}
