@@ -21,6 +21,10 @@ jobs:
   sync:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # Visíveis em todos steps (prisma generate roda no postinstall)
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,8 +40,6 @@ jobs:
 
       - name: Sync purchase(s)
         env:
-          DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
           HEADLESS: 'true'
           PURCHASE_ID: ${{ github.event.inputs.purchase_id || github.event.client_payload.purchase_id || '' }}
           ALL_PENDING: ${{ (github.event.inputs.purchase_id || github.event.client_payload.purchase_id) && '0' || '1' }}
