@@ -91,7 +91,7 @@ function AgentCard({ agent, featured }: { agent: Agent; featured?: boolean }) {
         />
         <div className={featured ? '' : 'min-w-0 flex-1'}>
           <div className={`flex items-center gap-2 ${featured ? 'justify-center' : ''}`}>
-            <h2 className={`${featured ? 'text-2xl' : 'text-lg'} font-bold ${textCls}`}>{agent.name}</h2>
+            <h2 className={`${featured ? 'text-2xl' : 'text-lg'} font-bold ${textCls}`}>{agent.id === 'vendetti' ? (agent.fullName ?? agent.name) : agent.name}</h2>
             <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>
               {status.label}
             </span>

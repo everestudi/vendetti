@@ -10,7 +10,7 @@
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  OBSIDIAN VAULT  (decision log, memória de longo prazo) │
-│  Projects/Vending CEO/                                  │
+│  Projects/Vendetti CEO/                                  │
 └────────────────────────────┬────────────────────────────┘
                              │ leitura/escrita
                              │
@@ -92,11 +92,11 @@ npm run db:generate      # regenera client
 
 ## Faseamento (4 sprints)
 
-Ver [`Projects/Vending CEO/02 - Backlog imediato.md`](file:///Users/luisneto/Documents/Obsidian%20Vault/Projects/Vending%20CEO/02%20-%20Backlog%20imediato.md) no Obsidian Vault.
+Ver [`Projects/Vendetti CEO/02 - Backlog imediato.md`](file:///Users/luisneto/Documents/Obsidian%20Vault/Projects/Vendetti%20CEO/02%20-%20Backlog%20imediato.md) no Obsidian Vault.
 
 ## Decision log
 
-Decisões arquiteturais e operacionais são versionadas em append-only no vault: [`Projects/Vending CEO/01 - Decisões.md`](file:///Users/luisneto/Documents/Obsidian%20Vault/Projects/Vending%20CEO/01%20-%20Decis%C3%B5es.md).
+Decisões arquiteturais e operacionais são versionadas em append-only no vault: [`Projects/Vendetti CEO/01 - Decisões.md`](file:///Users/luisneto/Documents/Obsidian%20Vault/Projects/Vendetti%20CEO/01%20-%20Decis%C3%B5es.md).
 
 ## Project Vend learnings aplicados
 

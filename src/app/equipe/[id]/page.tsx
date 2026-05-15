@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { TEAM, avatarUrl, type Agent } from '@/lib/agents/team';
+import { VendingMachineLive } from '@/components/VendingMachineLive';
+import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
+import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
 
-export const dynamic = 'force-static';
+export const dynamic = 'force-dynamic';
 
 export function generateStaticParams() {
   return TEAM.map((a) => ({ id: a.id }));
@@ -40,6 +43,17 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
   const subordinates = TEAM.filter((a) => a.reportsTo === agent.id);
   const status = STATUS[agent.status];
 
+  // Rita ganha a visão da máquina (operações = dela)
+  const isRita = agent.id === 'rita';
+  const ritaData = isRita
+    ? await Promise.all([getSlotsWithMargin(), getLatestSnapshot()]).then(([slots, snap]) => ({
+        slots,
+        capacityPct: snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : 0,
+        critical: snap?.slotsCritical ?? 0,
+        total: snap?.slotsTotal ?? slots.length,
+      }))
+    : null;
+
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
       <nav className="mb-6 text-sm">
@@ -58,7 +72,7 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
         />
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className={`text-4xl font-bold ${COLOR_TEXT[agent.color]}`}>{agent.name}</h1>
+            <h1 className={`text-4xl font-bold ${COLOR_TEXT[agent.color]}`}>{agent.id === 'vendetti' ? (agent.fullName ?? agent.name) : agent.name}</h1>
             <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.cls}`}>{status.label}</span>
           </div>
           <p className={`mt-1 text-lg font-medium ${COLOR_TEXT[agent.color]} opacity-80`}>{agent.role}</p>
@@ -110,6 +124,24 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
           </ul>
         </section>
       </div>
+
+      {/* Visão da máquina — só pra Rita */}
+      {isRita && ritaData && (
+        <section className="mt-8 rounded-2xl border-2 border-rose-200 bg-gradient-to-br from-rose-50 to-white p-6">
+          <header className="mb-4">
+            <h2 className="text-xl font-bold text-navy">A máquina, no chão de fábrica</h2>
+            <p className="text-sm text-navy/60">
+              Visão operacional da Rita. Cada slot mostra produto e status — clique pra abrir o detalhe no dashboard da Mara.
+            </p>
+          </header>
+          <VendingMachineLive
+            slots={ritaData.slots}
+            capacityPct={ritaData.capacityPct}
+            slotsCritical={ritaData.critical}
+            slotsTotal={ritaData.total}
+          />
+        </section>
+      )}
 
       {/* Hierarquia */}
       {(supervisor || subordinates.length > 0) && (

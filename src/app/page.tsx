@@ -47,32 +47,8 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* MÁQUINA INTERATIVA */}
-      <section className="mb-14 rounded-2xl border border-navy/10 bg-gradient-to-br from-navy-50 to-white p-6">
-        <header className="mb-4">
-          <h2 className="text-2xl font-bold text-navy">A máquina, ao vivo</h2>
-          <p className="text-sm text-navy/60">
-            Passe o mouse num slot pra ver detalhes · clique pra abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
-          </p>
-        </header>
-
-        <VendingMachineLive slots={slots} capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} />
-
-        <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/chat" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
-            Conversar com Vendetti →
-          </Link>
-          <Link href="/mara" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
-            Ver dashboard da Mara →
-          </Link>
-          <Link href="/equipe" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
-            Conhecer o time →
-          </Link>
-        </div>
-      </section>
-
       {/* TIME */}
-      <section className="mt-14">
+      <section className="mt-12">
         <header className="mb-4 flex items-baseline justify-between">
           <h2 className="text-2xl font-bold text-navy">O time</h2>
           <Link href="/equipe" className="text-sm text-navy/60 hover:text-navy">
@@ -94,13 +70,37 @@ export default async function Home() {
                 height={64}
                 className="rounded-full ring-2 ring-navy/10 transition group-hover:ring-navy/30"
               />
-              <div className="mt-2 text-sm font-semibold text-navy">{a.name}</div>
+              <div className="mt-2 text-sm font-semibold text-navy">{a.id === 'vendetti' ? (a.fullName ?? a.name) : a.name}</div>
               <div className="text-[10px] uppercase tracking-wide text-navy/50">{a.role.split(' · ')[0].split('/')[0].trim()}</div>
               {a.status === 'active' && <span className="mt-1 text-[10px] text-emerald-600">🟢 ativo</span>}
               {a.status === 'building' && <span className="mt-1 text-[10px] text-amber-600">🟡 em build</span>}
               {a.status === 'planned' && <span className="mt-1 text-[10px] text-navy/40">⚪ planejado</span>}
             </Link>
           ))}
+        </div>
+      </section>
+
+      {/* MÁQUINA INTERATIVA */}
+      <section className="mt-12 rounded-2xl border border-navy/10 bg-gradient-to-br from-navy-50 to-white p-6">
+        <header className="mb-4">
+          <h2 className="text-2xl font-bold text-navy">A máquina, ao vivo</h2>
+          <p className="text-sm text-navy/60">
+            Passe o mouse num slot pra ver detalhes · clique pra abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
+          </p>
+        </header>
+
+        <VendingMachineLive slots={slots} capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} />
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/chat" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
+            Conversar com Vendetti →
+          </Link>
+          <Link href="/mara" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
+            Ver dashboard da Mara →
+          </Link>
+          <Link href="/equipe/rita" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
+            Operações da Rita →
+          </Link>
         </div>
       </section>
 
