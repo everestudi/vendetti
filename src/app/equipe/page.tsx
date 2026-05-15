@@ -14,6 +14,7 @@ const COLOR_RING: Record<Agent['color'], string> = {
   emerald: 'ring-emerald-400/40',
   rose: 'ring-rose-400/40',
   amber: 'ring-amber-400/40',
+  sky: 'ring-sky-400/40',
 };
 const COLOR_TEXT: Record<Agent['color'], string> = {
   navy: 'text-navy',
@@ -21,6 +22,7 @@ const COLOR_TEXT: Record<Agent['color'], string> = {
   emerald: 'text-emerald-700',
   rose: 'text-rose-700',
   amber: 'text-amber-700',
+  sky: 'text-sky-700',
 };
 
 export default function TeamPage() {
@@ -48,8 +50,8 @@ export default function TeamPage() {
         </svg>
       </div>
 
-      {/* Sub-agentes em grid */}
-      <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+      {/* Sub-agentes em grid (5 agora, 2/3 cols responsivo) */}
+      <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
         {SUB_AGENTS.map((a) => (
           <AgentCard key={a.id} agent={a} />
         ))}

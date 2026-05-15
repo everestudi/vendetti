@@ -193,15 +193,37 @@ enum DecisionStatus {
 
 // === Reclamações ===
 
+/// Reclamação de cliente da vending machine — tratada pela Lúcia (SAC).
 model Complaint {
-  id           String   @id @default(cuid())
-  receivedAt   DateTime @default(now())
-  source       String   // "whatsapp-corporativo", "manual", ...
-  customerNote String   @db.Text
+  id            String           @id @default(cuid())
+  receivedAt    DateTime         @default(now())
+  /// "zapi", "whatsapp-corporativo", "manual"
+  source        String
+  customerPhone String?
+  customerNote  String           @db.Text
+  /// Slot reportado pelo cliente (ex: "13").
+  slotPosition  String?
+  /// URL de comprovante (foto/print enviada pelo cliente).
+  proofUrl      String?
+  /// Match com Transaction no Vendpago (se Lúcia conseguir cruzar).
   transactionId String?
-  resolution   String?  @db.Text
-  resolvedAt   DateTime?
-  refundAmount Decimal? @db.Decimal(10, 2)
+  status        ComplaintStatus  @default(RECEIVED)
+  resolution    String?          @db.Text
+  resolvedAt    DateTime?
+  refundAmount  Decimal?         @db.Decimal(10, 2)
+  escalatedAt   DateTime?
+  /// Conversa completa em jsonl
+  conversation  Json?
+}
+
+enum ComplaintStatus {
+  RECEIVED            // chegou inbound, triagem pendente
+  TRIAGE_REJECTED     // não é SAC válido — silenciado
+  AWAITING_PROOF      // Lúcia pediu comprovante
+  AWAITING_SLOT       // Lúcia pediu slot
+  ESCALATED           // mastigado e enviado pro Luís
+  REFUNDED
+  DISMISSED
 }
 
 // === Secrets (cifrados em AES-256-GCM com chave derivada de AUTH_SECRET) ===

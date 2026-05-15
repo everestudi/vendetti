@@ -20,7 +20,7 @@ export interface Agent {
   status: AgentStatus;
   reportsTo?: string;
   /** Tailwind color name pra acentos. */
-  color: 'navy' | 'gold' | 'emerald' | 'rose' | 'amber';
+  color: 'navy' | 'gold' | 'emerald' | 'rose' | 'amber' | 'sky';
   /** Hex sem # pra usar no DiceBear backgroundColor. */
   bgHex: string;
   /** Seed estável pro avatar. */
@@ -107,6 +107,26 @@ export const TEAM: Agent[] = [
     color: 'rose',
     bgHex: 'f43f5e',
     avatarSeed: 'Rita-FieldOps',
+  },
+  {
+    id: 'lucia',
+    name: 'Lúcia',
+    role: 'SAC · Atendimento ao Cliente',
+    tagline: 'Atende, identifica, mastiga, escala.',
+    description:
+      'Recebe mensagens de clientes da máquina via WhatsApp (Z-API). Identifica se é reclamação válida da vending, exige comprovante e qual slot deu problema, cruza com a transação no Vendpago e escala pro Luís com tudo mastigado pra reembolso.',
+    responsibilities: [
+      'Triagem de inbound do Z-API',
+      'Solicita comprovante + slot ao cliente',
+      'Cruza com Transaction no Vendpago',
+      'Escala pro Luís decidir reembolso',
+    ],
+    tools: ['zapi_inbound_parser', 'zapi_send_scripted', 'complaint_create', 'transaction_lookup', 'email_escalation'],
+    status: 'planned',
+    reportsTo: 'vendetti',
+    color: 'sky',
+    bgHex: '0ea5e9',
+    avatarSeed: 'Lucia-SAC',
   },
   {
     id: 'zelda',
