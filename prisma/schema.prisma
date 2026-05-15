@@ -27,6 +27,7 @@ model Sku {
   slots           Slot[]
   transactions    Transaction[]
   reposicoes      ReposicaoItem[]
+  purchaseItems   PurchaseItem[]
 }
 
 enum Supplier {
@@ -174,6 +175,43 @@ model ReposicaoItem {
   sku           Sku       @relation(fields: [skuId], references: [id])
   slotPosition  String?
   qty           Int
+}
+
+// === Compras (entrada via NF-e — foto/PDF/manual) ===
+
+/// Compra de produtos no fornecedor (Atacadão, Vittal, etc).
+/// Origem: foto/PDF da NF-e parseada via vision, ou cadastro manual.
+model Purchase {
+  id           String   @id @default(cuid())
+  occurredAt   DateTime // data da NF (não created)
+  supplier     Supplier
+  supplierName String?  // razão social cru da NF (livre)
+  invoiceRef   String?  // nº NF-e
+  invoiceUrl   String?  // URL da imagem/PDF salva
+  totalAmount  Decimal  @db.Decimal(10, 2)
+  notes        String?  @db.Text
+  /// Origem: "ui-upload", "whatsapp-luis", "manual"
+  source       String   @default("manual")
+  rawParsed    Json?    // saída cru do parser (audit)
+  itens        PurchaseItem[]
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([occurredAt])
+  @@index([supplier, occurredAt])
+}
+
+model PurchaseItem {
+  id          String   @id @default(cuid())
+  purchaseId  String
+  purchase    Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  skuId       String?
+  sku         Sku?     @relation(fields: [skuId], references: [id])
+  productName String   // nome cru da NF
+  productCode String?  // GTIN/EAN ou código fornecedor
+  qty         Int
+  unitCost    Decimal  @db.Decimal(10, 2)
+  totalCost   Decimal  @db.Decimal(10, 2)
 }
 
 // === Decision log do Vendetti (append-only) ===

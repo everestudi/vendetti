@@ -14,6 +14,8 @@
 
 import { NextResponse } from 'next/server';
 import { processLuciaInbound } from '@/lib/vendetti/lucia';
+import { handleNfeFromWhatsapp } from '@/lib/vendetti/nfe-from-whatsapp';
+import { classifyInbound } from '@/lib/zapi/allowlist';
 import { getSecret } from '@/lib/secrets';
 
 export const runtime = 'nodejs';
@@ -80,6 +82,17 @@ export async function POST(req: Request) {
 
   const text = body.text?.message ?? body.image?.caption ?? '';
   const imageUrl = body.image?.imageUrl;
+
+  // Admin (Luís) + mídia → roteia pra parser de NF-e (Rita).
+  // Sem mídia ainda não temos chat livre de admin → cai pra silence.
+  const klass = await classifyInbound(body.phone, text);
+  if (klass.tier === 'admin') {
+    if (imageUrl) {
+      const r = await handleNfeFromWhatsapp(body.phone, imageUrl);
+      return NextResponse.json({ route: 'admin-nfe', ...r });
+    }
+    return NextResponse.json({ ok: true, route: 'admin-text', ignored: 'admin chat livre não implementado' });
+  }
 
   const result = await processLuciaInbound({
     phone: body.phone,

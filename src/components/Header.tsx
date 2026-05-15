@@ -32,6 +32,7 @@ export function Header() {
           <NavLink href="/chat" label="Chat" />
           <NavLink href="/decisions" label="Decisões" />
           <NavLink href="/sac" label="SAC" />
+          <NavLink href="/bruno" label="Compras" />
           <NavLink href="/mara" label="Mara" />
           <NavLink href="/equipe" label="Equipe" />
           <NavLink href="/settings" label="Settings" />
