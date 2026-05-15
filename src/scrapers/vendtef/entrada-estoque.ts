@@ -33,16 +33,29 @@ async function freshLogin(ctx: BrowserContext) {
   if (!user || !pass) throw new Error('ERPVENDING_USER/PASS ausentes no DB');
 
   const page = await ctx.newPage();
+  page.setDefaultTimeout(45_000);
   await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
-  await page.locator('input[type="text"]:visible, input[name="login"], input[name="usuario"]').first().fill(user);
+  await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+  await page.screenshot({ path: `${OUT_DIR}/00-login-page.png`, fullPage: true }).catch(() => undefined);
+
+  await page
+    .locator('input[name="login"], input[name="usuario"], input[name="username"], input[name="user"], input[type="text"]:visible')
+    .first()
+    .fill(user);
   await page.locator('input[type="password"]:visible').first().fill(pass);
+  const submit = page
+    .locator(
+      'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), button:has-text("Login")',
+    )
+    .first();
   await Promise.all([
     page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined),
-    page.locator('button[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")').first().click(),
+    submit.click({ timeout: 15_000 }),
   ]);
   await page.waitForTimeout(2_000);
+  await page.screenshot({ path: `${OUT_DIR}/00-post-login.png`, fullPage: true }).catch(() => undefined);
   if (page.url().includes('/auth/login')) {
-    throw new Error('Login falhou — verificar credenciais');
+    throw new Error(`Login falhou — ainda em ${page.url()}`);
   }
   await page.close();
 }
@@ -180,6 +193,9 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
 
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
+
+  // Garante que screenshots existem mesmo se login falhar, pra subir como artifact
+  writeFileSync(`${OUT_DIR}/.touch`, new Date().toISOString());
 
   // Coleta IDs alvo
   const fromArgv = process.argv[2];
