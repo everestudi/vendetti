@@ -68,7 +68,7 @@ async function main() {
     });
     writeFileSync(`${OUT_DIR}/explore-links.json`, JSON.stringify(estoqueLinks, null, 2));
     console.log(`${estoqueLinks.length} links relacionados a estoque/operação/inventário`);
-    for (const l of estoqueLinks.slice(0, 30)) console.log(`  ${l.text} → ${l.href.split('.com.br').pop()}`);
+    for (const l of estoqueLinks.slice(0, 300)) console.log(`  ${l.text} → ${l.href.split('.com.br').pop()}`);
 
     // Captura todos os botões/links da página /erp/estoques (lista) e segue cada um
     await page.goto('https://www.erpvending.com.br/erp/estoques', { waitUntil: 'domcontentloaded' });
@@ -91,7 +91,7 @@ async function main() {
     // Segue cada link da row (Produtos Configurados, Acompanhamento, Realizar operação, etc)
     for (const link of estoqueRowLinks) {
       if (!link.href || !link.href.includes('erpvending')) continue;
-      const slug = (link.text || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+      const slug = (link.text || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 300);
       console.log(`\n→ ${link.text} (${link.href.split('.com.br').pop()})`);
       const resp = await page.goto(link.href, { waitUntil: 'domcontentloaded' }).catch((e) => null);
       if (!resp) continue;
@@ -102,7 +102,7 @@ async function main() {
         .filter((t) => (t as HTMLElement).offsetParent !== null)
         .map((t) => ({
           headers: Array.from(t.querySelectorAll('thead th, thead td')).map((c) => (c.textContent ?? '').trim()),
-          rows: Array.from(t.querySelectorAll('tbody tr')).slice(0, 30).map((tr) =>
+          rows: Array.from(t.querySelectorAll('tbody tr')).slice(0, 300).map((tr) =>
             Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()),
           ),
         })));
