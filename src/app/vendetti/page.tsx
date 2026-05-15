@@ -14,9 +14,9 @@ export const dynamic = 'force-dynamic';
 export const maxDuration = 120;
 
 const LEVEL_BADGE = {
-  GREEN: { cls: 'bg-emerald-100 text-emerald-800', label: '🟢' },
-  YELLOW: { cls: 'bg-amber-100 text-amber-800', label: '🟡' },
-  RED: { cls: 'bg-rose-100 text-rose-800', label: '🔴' },
+  GREEN: { cls: 'bg-emerald-100 text-emerald-800', label: '🟢 verde' },
+  YELLOW: { cls: 'bg-amber-100 text-amber-800', label: '🟡 amarelo' },
+  RED: { cls: 'bg-rose-100 text-rose-800', label: '🔴 vermelho' },
 } as const;
 
 const AGENT_COLOR: Record<string, string> = {
@@ -38,11 +38,11 @@ export default async function VendettiPage() {
       prisma.decision.findMany({ where: { status: 'AWAITING_PHYSICAL' }, orderBy: { createdAt: 'desc' } }),
       prisma.complaint.count({ where: { status: 'ESCALATED' } }),
       prisma.purchase.count({ where: { vendtefSyncedAt: null } }),
-      prisma.transaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 10, include: { sku: true } }),
-      prisma.decision.findMany({ orderBy: { createdAt: 'desc' }, take: 6 }),
+      prisma.transaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 15, include: { sku: true } }),
+      prisma.decision.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
     ]);
 
-  const events: { at: Date; emoji: string; agent: string; summary: string }[] = [];
+  const events: { at: Date; emoji: string; agent: string; summary: string; link?: string }[] = [];
   for (const t of transactions) {
     events.push({
       at: t.occurredAt,
@@ -56,23 +56,26 @@ export default async function VendettiPage() {
       at: d.createdAt,
       emoji: d.status === 'EXECUTED' ? '✅' : d.status === 'FAILED' ? '⚠️' : d.status === 'AWAITING_PHYSICAL' ? '⏳' : d.status === 'REJECTED' ? '🚫' : '🧠',
       agent: 'Vendetti',
-      summary: `${d.summary.slice(0, 80)} · ${d.status}`,
+      summary: `${d.summary.slice(0, 100)} · ${d.status}`,
+      link: '/decisions',
     });
   }
   events.sort((a, b) => b.at.getTime() - a.at.getTime());
 
+  const totalAction = pending.length + approved.length + awaitingPhysical.length;
+
   return (
     <>
       <AutoRefresh intervalMs={30_000} />
-      <main className="mx-auto max-w-7xl px-4 py-6">
+      <main className="mx-auto max-w-4xl px-4 py-8">
         {/* HERO */}
-        <section className="mb-6 flex items-start gap-5 rounded-2xl border border-navy/15 bg-gradient-to-br from-navy/[0.03] via-white to-gold/[0.06] p-6">
+        <section className="mb-8 flex flex-col items-start gap-5 rounded-2xl border border-navy/15 bg-gradient-to-br from-navy/[0.03] via-white to-gold/[0.06] p-6 sm:flex-row">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src={avatarUrl(CEO, 120)}
+            src={avatarUrl(CEO, 160)}
             alt="Augusto Vendetti"
-            width={88}
-            height={88}
+            width={120}
+            height={120}
             className="rounded-full ring-2 ring-navy/20"
           />
           <div className="flex-1">
@@ -80,115 +83,99 @@ export default async function VendettiPage() {
               Painel de Controle do CEO
             </div>
             <h1 className="mt-1 text-3xl font-bold text-navy">{CEO.fullName ?? CEO.name}</h1>
-            <p className="mt-1 max-w-2xl text-sm text-navy/70">
-              {CEO.role}. Você fala com ele, ele analisa, decide o que executar e propõe ações.
-              A palavra final ainda é sua — aqui em cima.
-            </p>
-          </div>
-          <div className="hidden flex-col items-end gap-1 text-right text-xs text-navy/60 md:flex">
-            <span>🟢 online · Claude Opus 4.7</span>
-            <span>auto-refresh 30s</span>
+            <p className="mt-2 max-w-2xl text-sm text-navy/70">{CEO.role}</p>
+            <p className="mt-2 max-w-2xl text-xs leading-relaxed text-navy/60">{CEO.backstory}</p>
+            <div className="mt-3 flex flex-wrap items-center gap-3 text-xs text-navy/55">
+              <span>🟢 Claude Opus 4.7</span>
+              <span>·</span>
+              <span>auto-refresh 30s</span>
+              {totalAction > 0 && (
+                <>
+                  <span>·</span>
+                  <span className="font-semibold text-amber-700">{totalAction} esperando sua ação ↓</span>
+                </>
+              )}
+            </div>
           </div>
         </section>
 
         {/* KPIs */}
-        <section className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-          <CeoKpi
-            label="Decisões pra você"
-            value={pending.length}
-            tone={pending.length > 0 ? 'amber' : 'neutral'}
-            href="#decisoes"
-          />
-          <CeoKpi
-            label="Prontas pra executar"
-            value={approved.length}
-            tone={approved.length > 0 ? 'blue' : 'neutral'}
-            href="#decisoes"
-          />
-          <CeoKpi
-            label="SAC escaladas"
-            value={complaintsOpen}
-            tone={complaintsOpen > 0 ? 'rose' : 'neutral'}
-            href="/sac"
-          />
-          <CeoKpi
-            label="Compras aguardando sync"
-            value={purchasesPending}
-            tone={purchasesPending > 0 ? 'amber' : 'neutral'}
-            href="/bruno"
-          />
+        <section className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <CeoKpi label="Decisões pra você" value={pending.length} tone={pending.length > 0 ? 'amber' : 'neutral'} href="#decisoes" />
+          <CeoKpi label="Prontas pra executar" value={approved.length} tone={approved.length > 0 ? 'blue' : 'neutral'} href="#decisoes" />
+          <CeoKpi label="SAC escaladas" value={complaintsOpen} tone={complaintsOpen > 0 ? 'rose' : 'neutral'} href="/sac" />
+          <CeoKpi label="Compras aguardando sync" value={purchasesPending} tone={purchasesPending > 0 ? 'amber' : 'neutral'} href="/bruno" />
         </section>
 
-        {/* GRID: chat (esq) + decisões/monitor (dir) */}
-        <section className="grid gap-5 lg:grid-cols-12">
-          {/* CHAT */}
-          <div className="rounded-2xl border border-navy/15 bg-white p-4 lg:col-span-7">
-            <header className="mb-2 flex items-baseline justify-between border-b border-navy/10 pb-2">
-              <h2 className="text-sm font-semibold text-navy">💬 Conversa com Augusto</h2>
-              <span className="text-[10px] text-navy/45">tools ativas · 18 capabilities</span>
-            </header>
-            <ChatVendetti hideHeader heightClass="h-[640px]" />
-          </div>
+        {/* CHAT */}
+        <section className="mb-8 rounded-2xl border border-navy/15 bg-white p-5">
+          <header className="mb-3 flex items-baseline justify-between border-b border-navy/10 pb-3">
+            <h2 className="text-lg font-semibold text-navy">💬 Conversa com Augusto</h2>
+            <span className="text-[10px] text-navy/45">tools ativas · 18 capabilities</span>
+          </header>
+          <ChatVendetti hideHeader heightClass="h-[560px]" />
+        </section>
 
-          {/* SIDEBAR */}
-          <div className="space-y-4 lg:col-span-5">
-            {/* Decisões */}
-            <section id="decisoes" className="rounded-2xl border border-navy/15 bg-white p-4">
-              <h2 className="mb-3 text-sm font-semibold text-navy">
-                🟡 Decisões aguardando você
-              </h2>
-              {pending.length === 0 && approved.length === 0 && awaitingPhysical.length === 0 ? (
-                <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-4 text-center text-xs text-emerald-900">
-                  ✓ Sem pendências
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {pending.map((d) => (
-                    <CompactPending key={d.id} d={d} />
-                  ))}
-                  {approved.map((d) => (
-                    <CompactApproved key={d.id} d={d} />
-                  ))}
-                  {awaitingPhysical.map((d) => (
-                    <CompactPhysical key={d.id} d={d} />
-                  ))}
-                </div>
-              )}
-              <div className="mt-3 text-right">
-                <Link href="/decisions" className="text-xs text-navy/55 hover:text-navy">
-                  Ver histórico completo →
-                </Link>
-              </div>
-            </section>
+        {/* DECISÕES */}
+        <section id="decisoes" className="mb-8 rounded-2xl border border-navy/15 bg-white p-5">
+          <header className="mb-4 flex items-baseline justify-between border-b border-navy/10 pb-3">
+            <h2 className="text-lg font-semibold text-navy">🟡 Decisões aguardando você</h2>
+            <Link href="/decisions" className="text-xs text-navy/55 hover:text-navy">
+              histórico completo →
+            </Link>
+          </header>
+          {totalAction === 0 ? (
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50/40 p-6 text-center text-sm text-emerald-900">
+              ✓ Nada esperando ação agora.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {pending.map((d) => (
+                <PendingCard key={d.id} d={d} />
+              ))}
+              {approved.map((d) => (
+                <ApprovedCard key={d.id} d={d} />
+              ))}
+              {awaitingPhysical.map((d) => (
+                <PhysicalCard key={d.id} d={d} />
+              ))}
+            </div>
+          )}
+        </section>
 
-            {/* Monitor */}
-            <section className="rounded-2xl border border-navy/15 bg-white p-4">
-              <h2 className="mb-3 text-sm font-semibold text-navy">📡 Monitor recente</h2>
-              {events.length === 0 ? (
-                <p className="text-xs text-navy/45">Sem eventos ainda.</p>
-              ) : (
-                <ul className="space-y-1.5">
-                  {events.slice(0, 8).map((e, i) => (
-                    <li key={i} className="flex items-start gap-2 text-xs">
-                      <span className="text-base leading-none">{e.emoji}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${AGENT_COLOR[e.agent] ?? 'bg-navy/10 text-navy/70'}`}>
-                        {e.agent}
-                      </span>
-                      <span className="min-w-0 flex-1 truncate text-navy/80">{e.summary}</span>
-                      <time className="shrink-0 text-[9px] text-navy/40">
-                        {e.at.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                      </time>
-                    </li>
-                  ))}
-                </ul>
-              )}
-              <div className="mt-3 text-right">
-                <Link href="/monitor" className="text-xs text-navy/55 hover:text-navy">
-                  Timeline completa →
-                </Link>
-              </div>
-            </section>
-          </div>
+        {/* MONITOR */}
+        <section className="mb-8 rounded-2xl border border-navy/15 bg-white p-5">
+          <header className="mb-4 flex items-baseline justify-between border-b border-navy/10 pb-3">
+            <h2 className="text-lg font-semibold text-navy">📡 Monitor recente</h2>
+            <Link href="/monitor" className="text-xs text-navy/55 hover:text-navy">
+              timeline completa →
+            </Link>
+          </header>
+          {events.length === 0 ? (
+            <p className="text-sm text-navy/45">Sem eventos ainda.</p>
+          ) : (
+            <ul className="space-y-2">
+              {events.slice(0, 12).map((e, i) => (
+                <li key={i} className="flex items-start gap-3 rounded-lg border border-navy/10 bg-navy-50/30 p-2.5">
+                  <span className="text-xl leading-none">{e.emoji}</span>
+                  <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${AGENT_COLOR[e.agent] ?? 'bg-navy/10 text-navy/70'}`}>
+                    {e.agent}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-navy/85">{e.summary}</div>
+                  </div>
+                  <time className="shrink-0 text-[10px] text-navy/40 font-mono">
+                    {e.at.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
+                  </time>
+                  {e.link && (
+                    <Link href={e.link} className="shrink-0 text-[10px] text-navy/40 hover:text-navy">
+                      →
+                    </Link>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </section>
       </main>
     </>
@@ -228,9 +215,10 @@ function CeoKpi({
 function DecisionMeta({ d }: { d: Decision }) {
   const level = LEVEL_BADGE[d.level as keyof typeof LEVEL_BADGE];
   return (
-    <div className="flex items-baseline gap-1.5 text-[10px]">
-      <span className={`rounded-full px-1.5 py-0.5 font-medium ${level.cls}`}>{level.label}</span>
-      <span className="text-navy/50">{d.kind}</span>
+    <div className="flex flex-wrap items-baseline gap-2 text-[10px]">
+      <span className={`rounded-full px-2 py-0.5 font-medium ${level.cls}`}>{level.label}</span>
+      <span className="text-navy/45">{d.kind}</span>
+      <span className="font-mono text-navy/35">{d.id.slice(0, 8)}</span>
       <span className="ml-auto text-navy/40">
         {new Date(d.createdAt).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}
       </span>
@@ -238,28 +226,28 @@ function DecisionMeta({ d }: { d: Decision }) {
   );
 }
 
-function CompactPending({ d }: { d: Decision }) {
+function PendingCard({ d }: { d: Decision }) {
   return (
-    <article className="rounded-lg border border-amber-200 bg-amber-50/30 p-3">
+    <article className="rounded-lg border border-amber-200 bg-amber-50/30 p-4">
       <DecisionMeta d={d} />
-      <h3 className="mt-1 text-sm font-semibold text-navy line-clamp-2">{d.summary}</h3>
-      <p className="mt-1 line-clamp-2 text-[11px] text-navy/65">{d.rationale}</p>
-      <div className="mt-2 flex items-center gap-2">
+      <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
+      <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <form action={approveDecision.bind(null, d.id)}>
-          <button className="rounded bg-emerald-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700">
+          <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
             ✓ Aprovar
           </button>
         </form>
-        <form action={rejectDecision} className="flex flex-1 gap-1">
+        <form action={rejectDecision} className="flex items-center gap-2">
           <input type="hidden" name="id" value={d.id} />
           <input
             type="text"
             name="reason"
             placeholder="motivo (opcional)"
-            className="min-w-0 flex-1 rounded border border-navy/15 px-1.5 py-1 text-[11px]"
+            className="rounded border border-navy/20 px-2 py-1 text-xs"
           />
-          <button className="rounded bg-rose-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-rose-700">
-            ✗
+          <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
+            ✗ Rejeitar
           </button>
         </form>
       </div>
@@ -267,16 +255,19 @@ function CompactPending({ d }: { d: Decision }) {
   );
 }
 
-function CompactApproved({ d }: { d: Decision }) {
+function ApprovedCard({ d }: { d: Decision }) {
   return (
-    <article className="rounded-lg border border-blue-200 bg-blue-50/30 p-3">
+    <article className="rounded-lg border border-blue-200 bg-blue-50/30 p-4">
       <DecisionMeta d={d} />
-      <h3 className="mt-1 text-sm font-semibold text-navy line-clamp-2">{d.summary}</h3>
-      <p className="mt-1 line-clamp-1 text-[11px] text-navy/65">{d.rationale}</p>
-      <div className="mt-2">
+      <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
+      <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
+      <p className="mt-2 text-[11px] text-blue-900/70">
+        ℹ &ldquo;Executar&rdquo; dispara o scraper agora (browser headless, ~30-60s).
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
         <form action={executeDecisionAction.bind(null, d.id)}>
-          <button className="rounded bg-navy px-3 py-1 text-[11px] font-semibold text-white hover:bg-navy-900">
-            🚀 Executar (~30-60s)
+          <button className="rounded bg-navy px-4 py-1.5 text-sm font-semibold text-white hover:bg-navy-900">
+            🚀 Executar
           </button>
         </form>
       </div>
@@ -284,15 +275,17 @@ function CompactApproved({ d }: { d: Decision }) {
   );
 }
 
-function CompactPhysical({ d }: { d: Decision }) {
+function PhysicalCard({ d }: { d: Decision }) {
   return (
-    <article className="rounded-lg border border-purple-200 bg-purple-50/30 p-3">
+    <article className="rounded-lg border border-purple-200 bg-purple-50/30 p-4">
       <DecisionMeta d={d} />
-      <h3 className="mt-1 text-sm font-semibold text-navy line-clamp-2">{d.summary}</h3>
-      <p className="mt-1 text-[11px] text-purple-900/75">⏳ Sistema OK · aguardando Weverton.</p>
-      <div className="mt-2">
+      <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
+      <p className="mt-2 text-[11px] text-purple-900/80">
+        ⏳ Sistema atualizado. Aguardando Weverton ajustar fisicamente.
+      </p>
+      <div className="mt-3">
         <form action={confirmPhysical.bind(null, d.id)}>
-          <button className="rounded bg-purple-700 px-3 py-1 text-[11px] font-semibold text-white hover:bg-purple-800">
+          <button className="rounded bg-purple-700 px-4 py-1.5 text-sm font-semibold text-white hover:bg-purple-800">
             ✓ Confirmar físico
           </button>
         </form>
