@@ -2,7 +2,6 @@ import { prisma } from '@/lib/db';
 import { approveDecision, rejectDecision, executeDecisionAction, confirmPhysical } from './actions';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120; // executor pode levar ~30-60s
 
 const LEVEL_BADGE = {
   GREEN: { cls: 'bg-emerald-100 text-emerald-800', label: '🟢 verde' },

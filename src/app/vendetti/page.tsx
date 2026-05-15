@@ -11,7 +11,6 @@ import {
 } from '@/app/decisions/actions';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = 120;
 
 const LEVEL_BADGE = {
   GREEN: { cls: 'bg-emerald-100 text-emerald-800', label: '🟢 verde' },
