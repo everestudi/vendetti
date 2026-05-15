@@ -1,60 +1,77 @@
 import Link from 'next/link';
 import { getLatestSnapshot, getSlotCount, getSkuCount } from '@/lib/vendetti/mara/analytics';
-import { CartoonMachine } from '@/components/CartoonMachine';
+import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
+import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { SprintProgress } from '@/components/SprintProgress';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const [snap, slots, skus] = await Promise.all([
+  const [snap, slotCount, skuCount, slots] = await Promise.all([
     getLatestSnapshot(),
     getSlotCount(),
     getSkuCount(),
+    getSlotsWithMargin(),
   ]);
 
   const capacityPct = snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : 0;
   const critical = snap?.slotsCritical ?? 0;
-  const total = snap?.slotsTotal ?? slots;
+  const total = snap?.slotsTotal ?? slotCount;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
       {/* HERO */}
-      <section className="grid items-center gap-8 lg:grid-cols-[1fr_280px]">
-        <div>
-          <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold">
-            inspirado no Project Vend · Anthropic
-          </div>
-          <h1 className="text-4xl font-bold leading-tight text-navy lg:text-5xl">
-            Vendetti — CEO autônomo da minha vending machine
-          </h1>
-          <p className="mt-3 text-lg text-navy/70">
-            Um time de 6 agentes (Claude Opus 4.7) operando a TCN Pro 6G no Blue Mall Rondon: análise de
-            dados, compras, atendimento, operações de campo, oversight e orquestração.
-          </p>
-
-          {/* KPIs rápidos */}
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <Kpi label="SKUs" value={skus} />
-            <Kpi label="Slots" value={total} />
-            <Kpi label="Capacidade" value={`${capacityPct.toFixed(0)}%`} tone={capacityPct < 40 ? 'red' : capacityPct < 70 ? 'amber' : 'emerald'} />
-            <Kpi label="Críticos" value={critical} tone={critical > 0 ? 'red' : 'emerald'} />
-          </div>
-
-          <div className="mt-6 flex flex-wrap gap-2">
-            <Link href="/mara" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
-              Ver análise da Mara →
-            </Link>
-            <Link href="/equipe" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
-              Conhecer o time →
-            </Link>
-          </div>
+      <section className="mb-8">
+        <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold">
+          inspirado no Project Vend · Anthropic
         </div>
+        <h1 className="text-4xl font-bold leading-tight text-navy lg:text-5xl">
+          Vendetti — CEO autônomo da minha vending machine
+        </h1>
+        <p className="mt-3 max-w-3xl text-lg text-navy/70">
+          Um time de 6 agentes (Claude Opus 4.7) operando a TCN Pro 6G no Blue Mall Rondon: análise de
+          dados, compras, atendimento, operações de campo, oversight e orquestração.
+        </p>
 
-        <CartoonMachine capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} online />
+        {/* KPIs */}
+        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Kpi label="SKUs" value={skuCount} />
+          <Kpi label="Slots" value={total} />
+          <Kpi
+            label="Capacidade"
+            value={`${capacityPct.toFixed(0)}%`}
+            tone={capacityPct < 40 ? 'red' : capacityPct < 70 ? 'amber' : 'emerald'}
+          />
+          <Kpi label="Críticos" value={critical} tone={critical > 0 ? 'red' : 'emerald'} />
+        </div>
       </section>
 
-      {/* TIME — mini-strip de avatares com link */}
+      {/* MÁQUINA INTERATIVA */}
+      <section className="mb-14 rounded-2xl border border-navy/10 bg-gradient-to-br from-navy-50 to-white p-6">
+        <header className="mb-4">
+          <h2 className="text-2xl font-bold text-navy">A máquina, ao vivo</h2>
+          <p className="text-sm text-navy/60">
+            Passe o mouse num slot pra ver detalhes · clique pra abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
+          </p>
+        </header>
+
+        <VendingMachineLive slots={slots} capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} />
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/chat" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
+            Conversar com Vendetti →
+          </Link>
+          <Link href="/mara" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
+            Ver dashboard da Mara →
+          </Link>
+          <Link href="/equipe" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
+            Conhecer o time →
+          </Link>
+        </div>
+      </section>
+
+      {/* TIME */}
       <section className="mt-14">
         <header className="mb-4 flex items-baseline justify-between">
           <h2 className="text-2xl font-bold text-navy">O time</h2>
@@ -87,7 +104,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* EVOLUÇÃO DO PROJETO */}
+      {/* EVOLUÇÃO */}
       <section className="mt-14">
         <header className="mb-4">
           <h2 className="text-2xl font-bold text-navy">Evolução do projeto</h2>
@@ -101,9 +118,9 @@ export default async function Home() {
         <h2 className="text-lg font-semibold text-navy">Inspiração — Project Vend Phase 2 (Anthropic)</h2>
         <p className="mt-2 text-sm text-navy/75">
           A Anthropic rodou um experimento onde o Claude operou uma vending machine no escritório deles ("Claudius").
-          Phase 1 deu prejuízo — alucinações, descontos descontrolados, crise de identidade. Phase 2 acertou com
-          modelo melhor (Sonnet 4.5), procedimentos forçados, e arquitetura de 3 camadas (agente + oversight +
-          escalação humana). O Vendetti aplica essas 3 lições desde o dia zero.
+          Phase 1 deu prejuízo. Phase 2 acertou com modelo melhor (Sonnet 4.5), procedimentos forçados, e
+          arquitetura de 3 camadas (agente + oversight + escalação humana). Vendetti aplica essas 3 lições desde o
+          dia zero.
         </p>
         <div className="mt-3 flex flex-wrap gap-2 text-xs">
           <a href="https://www.anthropic.com/research/project-vend-1" target="_blank" rel="noopener" className="rounded bg-navy/10 px-2 py-1 text-navy hover:bg-navy/20">
