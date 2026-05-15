@@ -116,6 +116,12 @@ async function fillAndSubmit(page: Page, args: Args, current: NonNullable<Awaite
   async function setField(name: string, value: string) {
     const input = topModalLocator.locator(`[name="${name}"]`);
     await input.fill(value, { timeout: 5_000 });
+    // Dispara change + input events caso o handler do form escute
+    await input.evaluate((el: HTMLInputElement) => {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      el.dispatchEvent(new Event('blur', { bubbles: true }));
+    });
   }
 
   if (args.capacity !== undefined) await setField('capacidade', String(args.capacity));
@@ -123,9 +129,45 @@ async function fillAndSubmit(page: Page, args: Args, current: NonNullable<Awaite
   if (args.qtdeAlerta !== undefined) await setField('qtde_estoque_alerta', String(args.qtdeAlerta));
   if (args.qtdeCritico !== undefined) await setField('qtde_estoque_critico', String(args.qtdeCritico));
 
-  // Submit
+  // Submit — busca o botão VISÍVEL "Editar" dentro do modal topo via JS direto.
+  // Modais Bootstrap antigos costumam ter inputs escondidos com value="Editar" no DOM.
   console.log('  → submetendo (botão "Editar")...');
-  await topModalLocator.locator('button:has-text("Editar")').first().click({ force: true });
+  const submitInfo = await page.evaluate(() => {
+    const modals = Array.from(document.querySelectorAll('.modal.in, .modal.show'));
+    const top = modals[modals.length - 1] as HTMLElement | undefined;
+    if (!top) return { ok: false, reason: 'sem modal top' };
+    const cands = Array.from(
+      top.querySelectorAll<HTMLElement>('button, input[type="submit"], input[type="button"]'),
+    ).filter((b) => {
+      const visible = b.offsetParent !== null && (b as HTMLElement).getBoundingClientRect().width > 0;
+      if (!visible) return false;
+      const text =
+        (b.tagName === 'INPUT' ? (b as HTMLInputElement).value : (b.textContent ?? '')).trim();
+      return /^Editar$/i.test(text);
+    });
+    if (cands.length === 0) return { ok: false, reason: 'nenhum botão "Editar" visível no modal top' };
+    // Prioriza .btn-primary
+    const primary = cands.find((c) => c.className.includes('btn-primary')) ?? cands[0];
+    primary.click();
+    return {
+      ok: true,
+      tag: primary.tagName,
+      type: (primary as HTMLInputElement).type,
+      className: primary.className,
+      count: cands.length,
+    };
+  });
+  if (!submitInfo.ok) {
+    console.log(`     ⚠️ ${('reason' in submitInfo) ? submitInfo.reason : 'falha desconhecida'}`);
+    console.log('     fallback: form.requestSubmit()');
+    await page.evaluate(() => {
+      const top = Array.from(document.querySelectorAll('.modal.in, .modal.show')).pop() as HTMLElement | undefined;
+      const form = top?.querySelector('form');
+      form?.requestSubmit();
+    });
+  } else {
+    console.log(`     ✓ clicou em <${submitInfo.tag}${submitInfo.type ? ` type=${submitInfo.type}` : ''}> .${submitInfo.className.slice(0, 40)}`);
+  }
 
   // Aguarda fechamento ou erro
   await Promise.race([
@@ -173,7 +215,27 @@ async function main() {
     }
 
     await fillAndSubmit(page, args, before);
-    await page.waitForTimeout(2_000);
+    await page.waitForTimeout(4_000);
+
+    // Diagnóstico: screenshot e estado do modal
+    await page.screenshot({ path: `./tmp/selecoes/_debug-post-submit-${args.selecao}.png`, fullPage: true });
+    const modalState = await page.evaluate(() => {
+      const top = Array.from(document.querySelectorAll('.modal.in, .modal.show')).pop() as HTMLElement | undefined;
+      if (!top) return { open: false };
+      const errors = Array.from(top.querySelectorAll('.alert, .error, .help-block, .text-danger, .invalid-feedback'))
+        .map((e) => (e.textContent ?? '').trim())
+        .filter(Boolean);
+      const currentCapacity = (top.querySelector('[name="capacidade"]') as HTMLInputElement | null)?.value;
+      return { open: true, errors, currentCapacity, title: top.querySelector('.modal-title')?.textContent?.trim() };
+    });
+    console.log(`  modal aberto após submit? ${modalState.open} (title="${modalState.open ? (modalState as { title?: string }).title : '-'}")`);
+    if (modalState.open && 'currentCapacity' in modalState) {
+      console.log(`  capacidade no modal: ${modalState.currentCapacity}`);
+      if (modalState.errors && modalState.errors.length > 0) {
+        console.log(`  ⚠️ mensagens no form:`);
+        for (const e of modalState.errors) console.log(`     · ${e}`);
+      }
+    }
 
     // Re-abre modal de edição da MESMA seleção e relê — confirma persistência
     console.log('\nverificando persistência...');
