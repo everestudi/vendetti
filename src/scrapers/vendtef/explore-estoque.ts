@@ -70,6 +70,42 @@ async function main() {
     console.log(`${estoqueLinks.length} links relacionados a estoque/operação/inventário`);
     for (const l of estoqueLinks.slice(0, 300)) console.log(`  ${l.text} → ${l.href.split('.com.br').pop()}`);
 
+    // Histórico de estoque — testa várias datas pra achar onde a operação aparece
+    // Tenta data atual + ontem + alguns dias atrás
+    for (const daysAgo of [0, 1, 2, 3, 7]) {
+      const d = new Date();
+      d.setDate(d.getDate() - daysAgo);
+      const dateStr = `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}/${d.getFullYear()}`;
+      console.log(`\n→ histórico data ${dateStr}`);
+      await page.goto('https://www.erpvending.com.br/erp/historico-estoque', { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+      // Acha campo de data e preenche
+      const dateInputs = await page.locator('input').all();
+      for (const inp of dateInputs) {
+        const placeholder = await inp.getAttribute('placeholder');
+        const value = await inp.inputValue().catch(() => '');
+        if (placeholder?.match(/data|dd\/mm/i) || value?.match(/\d{2}\/\d{2}\/\d{4}/) || (await inp.getAttribute('class') ?? '').includes('date')) {
+          await inp.fill(dateStr).catch(() => undefined);
+          await inp.press('Enter').catch(() => undefined);
+          break;
+        }
+      }
+      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(1_500);
+      await page.screenshot({ path: `${OUT_DIR}/hist-${daysAgo}d.png`, fullPage: true });
+      const histTables = await page.evaluate(() => Array.from(document.querySelectorAll('table'))
+        .filter((t) => (t as HTMLElement).offsetParent !== null)
+        .map((t) => ({
+          headers: Array.from(t.querySelectorAll('thead th, thead td')).map((c) => (c.textContent ?? '').trim()),
+          rows: Array.from(t.querySelectorAll('tbody tr')).slice(0, 50).map((tr) =>
+            Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()),
+          ),
+        })));
+      writeFileSync(`${OUT_DIR}/hist-${daysAgo}d.json`, JSON.stringify(histTables, null, 2));
+      const n = histTables[0]?.rows.length ?? 0;
+      console.log(`  ${n} operações`);
+    }
+
     // Captura todos os botões/links da página /erp/estoques (lista) e segue cada um
     await page.goto('https://www.erpvending.com.br/erp/estoques', { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => undefined);
