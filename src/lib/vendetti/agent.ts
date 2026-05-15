@@ -17,7 +17,9 @@ export async function getVendettiModel() {
   if (!apiKey) {
     throw new Error('ANTHROPIC_API_KEY ausente — configure em /settings');
   }
-  const anthropic = createAnthropic({ apiKey });
+  // baseURL explícito — em @ai-sdk/anthropic 3.0.77 o default bate em /messages
+  // (sem /v1) e retorna 404. Setando manualmente.
+  const anthropic = createAnthropic({ apiKey, baseURL: 'https://api.anthropic.com/v1' });
   return anthropic(MODEL_ID);
 }
 
