@@ -69,16 +69,28 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
         </div>
       </header>
 
-      {/* Sobre */}
-      <section className="mt-8 rounded-lg border border-navy/10 bg-white p-6">
-        <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">Sobre</h2>
+      {/* Backstory — quem é a Zelda/Rita/etc */}
+      <section className="mt-8 rounded-lg border border-gold/30 bg-gold-50 p-6">
+        <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gold-900">
+          <svg viewBox="0 0 20 20" className="h-4 w-4 fill-current"><path d="M10 2a8 8 0 100 16 8 8 0 000-16zm0 14a6 6 0 110-12 6 6 0 010 12z M9 7h2v6H9z M9 5h2v1.5H9z" /></svg>
+          {agent.origin}
+        </div>
+        <p className="text-base leading-relaxed text-navy/85 italic">"{agent.backstory}"</p>
+        <div className="mt-3 text-[10px] text-navy/40">
+          (persona ficcional — todos os agentes são instâncias do Claude Opus 4.7 com prompts diferentes)
+        </div>
+      </section>
+
+      {/* O que faz profissionalmente */}
+      <section className="mt-6 rounded-lg border border-navy/10 bg-white p-6">
+        <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">No trabalho</h2>
         <p className="mt-2 text-base leading-relaxed text-navy/85">{agent.description}</p>
       </section>
 
       {/* O que faz + Ferramentas */}
       <div className="mt-6 grid gap-6 sm:grid-cols-2">
         <section className="rounded-lg border border-navy/10 bg-white p-6">
-          <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">O que faz</h2>
+          <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">Responsabilidades</h2>
           <ul className="mt-3 space-y-2 text-sm text-navy/80">
             {agent.responsibilities.map((r) => (
               <li key={r} className="flex items-start gap-2">

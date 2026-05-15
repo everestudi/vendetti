@@ -106,6 +106,11 @@ function AgentCard({ agent, featured }: { agent: Agent; featured?: boolean }) {
 
       <p className={`${featured ? 'mt-5' : 'mt-3'} text-sm leading-relaxed text-navy/75`}>{agent.description}</p>
 
+      <div className={`${featured ? 'mt-3' : 'mt-2'} flex items-center gap-1.5 text-xs text-navy/45`}>
+        <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current opacity-60"><circle cx="8" cy="8" r="3" /></svg>
+        {agent.origin}
+      </div>
+
       <div className={`mt-4 grid gap-3 ${featured ? 'sm:grid-cols-2' : ''}`}>
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-wide text-navy/40">O que faz</div>
