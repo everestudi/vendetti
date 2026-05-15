@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { CEO, avatarUrl } from '@/lib/agents/team';
-import { ChatVendetti } from '@/components/ChatVendetti';
+import { ChatVendettiDynamic } from '@/components/ChatVendettiDynamic';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import {
   approveDecision,
@@ -113,7 +113,7 @@ export default async function VendettiPage() {
             <h2 className="text-lg font-semibold text-navy">💬 Conversa com Augusto</h2>
             <span className="text-[10px] text-navy/45">tools ativas · 18 capabilities</span>
           </header>
-          <ChatVendetti hideHeader heightClass="h-[560px]" />
+          <ChatVendettiDynamic hideHeader heightClass="h-[560px]" />
         </section>
 
         {/* DECISÕES */}
