@@ -20,6 +20,7 @@ import {
   LIMITS,
   MIN_MARGIN_PCT,
 } from './policies';
+import { searchAtacadao } from '../../scrapers/atacadao/search';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -405,6 +406,82 @@ export const zelda_audit_recent = tool({
   },
 });
 
+// ============================================================
+// Bruno — Comprador (Atacadão)
+// ============================================================
+
+export const bruno_search_atacadao = tool({
+  description:
+    'Bruno pesquisa um produto no Atacadão online (atacadao.com.br) e retorna até N resultados com nome, marca, preço, tamanho e link. Use quando precisar comparar custo de fornecedor com preço de venda atual, ou pra cotar antes de propor compra. Fuzzy search — busque por palavra-chave do produto, não código.',
+  inputSchema: z.object({
+    query: z.string().min(2).describe('Termo de busca, ex: "Red Bull 250ml", "água crystal", "kit kat"'),
+    limit: z.number().int().min(1).max(15).default(8),
+  }),
+  execute: async ({ query, limit }) => {
+    try {
+      const products = await searchAtacadao(query, limit);
+      return {
+        from: 'Bruno · Comprador',
+        query,
+        count: products.length,
+        results: products.map((p) => ({
+          name: p.name,
+          brand: p.brand,
+          size: p.size,
+          price: p.price,
+          link: p.link,
+        })),
+      };
+    } catch (err) {
+      return {
+        from: 'Bruno · Comprador',
+        error: (err as Error).message,
+      };
+    }
+  },
+});
+
+export const bruno_compare_with_slot = tool({
+  description:
+    'Compara o custo no Atacadão com o preço atual de um slot. Útil pra detectar oportunidades: "produto X tá custando R$ Y no Atacadão, mas no slot Z eu compro por mais (custo cadastrado)". Retorna sugestão de ação.',
+  inputSchema: z.object({
+    selecao: z.string().describe('Número da seleção no Vendtef, ex: "13"'),
+    query: z.string().optional().describe('Termo de busca; se vazio, usa o nome do SKU do slot'),
+  }),
+  execute: async ({ selecao, query }) => {
+    const slot = await prisma.slot.findFirst({ where: { position: selecao }, include: { sku: true } });
+    if (!slot || !slot.sku) return { from: 'Bruno', error: `slot ${selecao} sem SKU` };
+    const term = query ?? slot.sku.name;
+    const results = await searchAtacadao(term, 5);
+    if (results.length === 0) return { from: 'Bruno', error: 'sem resultados no Atacadão pra esse termo' };
+
+    const currentPrice = Number(slot.price ?? 0);
+    const currentMargin = Number(slot.marginEst ?? 0);
+    const currentCost = currentPrice - currentMargin;
+    const cheapest = results.reduce<{ name: string; price: number } | null>((min, p) => {
+      if (p.price === null) return min;
+      if (!min || p.price < min.price) return { name: p.name, price: p.price };
+      return min;
+    }, null);
+
+    return {
+      from: 'Bruno · Comprador',
+      slot: selecao,
+      product: slot.sku.name,
+      currentPrice,
+      currentCostEstimated: currentCost,
+      atacadaoSearch: results.slice(0, 3).map((p) => ({ name: p.name, brand: p.brand, price: p.price, size: p.size })),
+      cheapestAtacadao: cheapest,
+      hint:
+        cheapest && currentCost > cheapest.price
+          ? `Atacadão pode ter mais barato — custo cadastrado R$ ${currentCost.toFixed(2)} vs R$ ${cheapest.price.toFixed(2)} no Atacadão (${cheapest.name})`
+          : cheapest
+            ? `Custo cadastrado (R$ ${currentCost.toFixed(2)}) tá próximo do Atacadão (R$ ${cheapest.price.toFixed(2)})`
+            : 'sem comparativo de preço disponível',
+    };
+  },
+});
+
 export const VENDETTI_TOOLS = {
   mara_summary,
   mara_margin_buckets,
@@ -415,6 +492,8 @@ export const VENDETTI_TOOLS = {
   zelda_check_proposal,
   zelda_policy_limits,
   zelda_audit_recent,
+  bruno_search_atacadao,
+  bruno_compare_with_slot,
   decision_create,
   vendetti_propose_slot_change,
 } as const;
