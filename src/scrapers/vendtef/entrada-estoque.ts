@@ -209,51 +209,85 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
       return { ok: false, error: 'nenhum item válido (todos sem skuId)' };
     }
 
-    // Match cada Purchase item contra products
-    const matched: { pid: string; vendtefName: string; ourName: string; qty: number; score: number }[] = [];
-    const unmatched: { ourName: string; qty: number; bestScore: number; bestVendtefName: string }[] = [];
+    // Match cada Purchase item contra products. Threshold 70.
+    // Se 2 source items reclamam o mesmo pid (ex: C/G vs S/G mappeando pro único Água C Gás),
+    // ambos viram unmatched — Luís resolve manual depois.
+    const candidates: { ourName: string; qty: number; bestPid: string; bestVendtefName: string; bestScore: number }[] = [];
     for (const it of purchase.items) {
       const best = bestMatch(it.productName, products);
-      if (best && best.score >= 60) {
-        matched.push({ pid: best.row.pid, vendtefName: best.row.name, ourName: it.productName, qty: it.qty, score: best.score });
+      candidates.push({
+        ourName: it.productName,
+        qty: it.qty,
+        bestPid: best?.row.pid ?? '',
+        bestVendtefName: best?.row.name ?? '—',
+        bestScore: best?.score ?? 0,
+      });
+    }
+
+    // Conta quantos sources mappearam pra cada pid (acima do threshold)
+    const claimCount = new Map<string, number>();
+    for (const c of candidates) {
+      if (c.bestScore >= 70 && c.bestPid) {
+        claimCount.set(c.bestPid, (claimCount.get(c.bestPid) ?? 0) + 1);
+      }
+    }
+
+    const matched: { pid: string; vendtefName: string; ourName: string; qty: number; score: number }[] = [];
+    const unmatched: { ourName: string; qty: number; bestScore: number; bestVendtefName: string; reason: string }[] = [];
+    for (const c of candidates) {
+      if (c.bestScore < 70 || !c.bestPid) {
+        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: c.bestScore < 70 ? 'score baixo' : 'sem candidato' });
+      } else if ((claimCount.get(c.bestPid) ?? 0) > 1) {
+        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: `colisão com outro item no ${c.bestPid}` });
       } else {
-        unmatched.push({ ourName: it.productName, qty: it.qty, bestScore: best?.score ?? 0, bestVendtefName: best?.row.name ?? '—' });
+        matched.push({ pid: c.bestPid, vendtefName: c.bestVendtefName, ourName: c.ourName, qty: c.qty, score: c.bestScore });
       }
     }
 
     writeFileSync(`${OUT_DIR}/match-result.json`, JSON.stringify({ matched, unmatched }, null, 2));
     console.log(`  matched: ${matched.length}, unmatched: ${unmatched.length}`);
     for (const m of matched) console.log(`    ✓ ${m.qty}× "${m.ourName}" → ${m.pid} "${m.vendtefName}" (${m.score}%)`);
-    for (const u of unmatched) console.log(`    ✗ "${u.ourName}" — best: ${u.bestScore}% "${u.bestVendtefName}"`);
+    for (const u of unmatched) console.log(`    ✗ "${u.ourName}" — ${u.reason} (best: ${u.bestScore}% "${u.bestVendtefName}")`);
 
     if (matched.length === 0) {
-      return { ok: false, error: `nenhum item bate com produtos do Vendtef (${unmatched.length} sem match)` };
+      return { ok: false, error: `nenhum item bate com Vendtef (${unmatched.length} unmatched)` };
     }
 
-    // Preenche os qtdes
+    // Preenche qtdes
     for (const m of matched) {
       await page.locator(`input[name="${m.pid}"]`).fill(String(m.qty));
     }
     await page.screenshot({ path: `${OUT_DIR}/03-filled.png`, fullPage: true });
 
-    // Salva
+    // Salva → abre modal de confirmação
     await page.locator('input[name="save"], button:has-text("Salvar")').first().click();
-    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
-    await page.waitForTimeout(2_500);
-    await page.screenshot({ path: `${OUT_DIR}/04-after-save.png`, fullPage: true });
+    await page.waitForTimeout(1_500);
+    await page.screenshot({ path: `${OUT_DIR}/04-modal-confirm.png`, fullPage: true });
 
-    // Sucesso provável se redirecionou pra lista (não na URL de operacoes-estoque)
+    // Confirma no modal
+    const confirmBtn = page.locator('.modal:visible button:has-text("Confirmar"), [role="dialog"]:visible button:has-text("Confirmar"), button.btn-primary:has-text("Confirmar")').first();
+    if (await confirmBtn.count() > 0) {
+      await confirmBtn.click({ force: true });
+      await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
+      await page.waitForTimeout(2_500);
+    } else {
+      console.log('  ⚠️ modal de confirmação não apareceu — verificar 04-modal-confirm.png');
+    }
+    await page.screenshot({ path: `${OUT_DIR}/05-after-confirm.png`, fullPage: true });
+
+    // Sucesso: redirect ou mensagem de sucesso
     const finalUrl = page.url();
-    const stillOnForm = finalUrl.includes('operacoes-estoque') && !finalUrl.includes('lista');
-    if (stillOnForm) {
-      // Verifica se tem mensagem de erro
-      const errMsg = await page.locator('.alert-danger, .error, [class*="error"]').first().textContent().catch(() => null);
-      return { ok: false, error: `submit pode ter falhado, ainda em ${finalUrl}${errMsg ? ` | ${errMsg.slice(0, 100)}` : ''}` };
+    const successMsg = await page.locator('.alert-success, .toast-success, [class*="success"]').first().textContent({ timeout: 1_000 }).catch(() => null);
+    const errMsg = await page.locator('.alert-danger, .toast-error, [class*="error"]').first().textContent({ timeout: 1_000 }).catch(() => null);
+
+    if (errMsg && errMsg.trim()) {
+      return { ok: false, error: `Vendtef: ${errMsg.slice(0, 200)}` };
     }
 
     if (unmatched.length > 0) {
-      return { ok: false, error: `parcial: ${matched.length} OK, ${unmatched.length} sem match no Vendtef` };
+      return { ok: false, error: `parcial: ${matched.length} OK no Vendtef, ${unmatched.length} sem match (revisar manual)` };
     }
+    console.log(`  ✓ finalUrl=${finalUrl} ${successMsg ? `msg="${successMsg.slice(0, 80)}"` : ''}`);
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
