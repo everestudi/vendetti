@@ -19,6 +19,12 @@ import { getSecret } from '@/lib/secrets';
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
+// Circuit breaker em memória: mesma phone só pode disparar processamento 1x a cada 3s.
+// Defesa-em-profundidade caso o filtro `type !== 'ReceivedCallback'` falhe e a Z-API
+// mande envio próprio de volta. Reset por cold start é aceitável (ainda corta surto).
+const lastSeen = new Map<string, number>();
+const COOLDOWN_MS = 3000;
+
 interface ZapiTextMessage { message?: string }
 interface ZapiImageMessage { imageUrl?: string; caption?: string }
 interface ZapiPayload {
@@ -46,6 +52,13 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as ZapiPayload;
 
+  // Z-API manda tipos diferentes pro mesmo webhook URL:
+  //   - ReceivedCallback   → mensagem inbound do cliente (único que processamos)
+  //   - MessageStatusCallback / DeliveryCallback / SendMessageCallback → eventos de envio
+  // Se aceitarmos os 2, entramos em loop: cada sendText vira nova "msg" pro webhook.
+  if (body.type && body.type !== 'ReceivedCallback') {
+    return NextResponse.json({ ok: true, ignored: `type:${body.type}` });
+  }
   // fromMe → silencia (eco da própria msg que mandamos)
   if (body.fromMe === true) {
     return NextResponse.json({ ok: true, ignored: 'fromMe' });
@@ -57,6 +70,13 @@ export async function POST(req: Request) {
   if (!body.phone) {
     return NextResponse.json({ ok: false, error: 'phone ausente' }, { status: 400 });
   }
+
+  const now = Date.now();
+  const last = lastSeen.get(body.phone) ?? 0;
+  if (now - last < COOLDOWN_MS) {
+    return NextResponse.json({ ok: true, ignored: 'cooldown' });
+  }
+  lastSeen.set(body.phone, now);
 
   const text = body.text?.message ?? body.image?.caption ?? '';
   const imageUrl = body.image?.imageUrl;
