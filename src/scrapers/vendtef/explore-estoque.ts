@@ -15,12 +15,11 @@ const LOGIN_URL = 'https://www.erpvending.com.br/auth/login/index';
 const HEADLESS = process.env.HEADLESS !== 'false';
 
 const CANDIDATE_URLS = [
-  'https://www.erpvending.com.br/erp/lista-estoques',
-  'https://www.erpvending.com.br/erp/operacoes-estoque',
-  'https://www.erpvending.com.br/erp/acompanhamento-estoque',
-  'https://www.erpvending.com.br/erp/acompanhamento-estoques',
+  'https://www.erpvending.com.br/erp/estoques',
+  'https://www.erpvending.com.br/erp/relatorio-estoque',
   'https://www.erpvending.com.br/erp/historico-estoque',
-  'https://www.erpvending.com.br/erp/operacoes',
+  'https://www.erpvending.com.br/erp/operacoes-pendentes',
+  'https://www.erpvending.com.br/erp/operacoes-remotas',
 ];
 
 async function freshLogin(ctx: BrowserContext) {
