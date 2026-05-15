@@ -1,0 +1,10 @@
+# Não enviar pro Vercel
+.env
+.env.local
+.next/
+tmp/
+docs/
+*.log
+.playwright/
+playwright-report/
+test-results/

@@ -5,6 +5,7 @@
   "description": "Vendetti — agente CEO da vending machine TCN Pro 6G no Blue Mall Rondon (nome formal: Augusto Vendetti)",
   "scripts": {
     "setup": "bash scripts/setup.sh",
+    "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
