@@ -16,6 +16,7 @@ import {
   newAuthedContext,
   SESSION_PATH,
 } from '../../../scrapers/_shared/playwright';
+import { extractTransactionsLastNMonths, type RawTransaction } from './extract-transactions';
 
 export interface RawSlot {
   selecao: string;
@@ -65,6 +66,7 @@ export interface ExtractResult {
   skus: RawSku[];
   snapshot: RawInventorySnapshot;
   dailyRevenue: RawDailyRevenue[];
+  transactions: RawTransaction[];
 }
 
 const MACHINE_LABEL = 'Maquina BlueMall Rondon';
@@ -79,9 +81,11 @@ export async function extractAll(): Promise<ExtractResult> {
     const skus = await extractCatalog(ctx);
     const snapshot = await extractSnapshot(ctx);
     const dailyRevenue = await extractDailyRevenue(ctx);
+    console.log('  extraindo transações (últimos 6 meses, 6 chunks de 30 dias)...');
+    const transactions = await extractTransactionsLastNMonths(ctx, 6);
 
     await ctx.storageState({ path: SESSION_PATH });
-    return { slots, skus, snapshot, dailyRevenue };
+    return { slots, skus, snapshot, dailyRevenue, transactions };
   } finally {
     await ctx.close();
     await browser.close();

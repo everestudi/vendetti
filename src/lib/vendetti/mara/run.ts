@@ -14,11 +14,11 @@ async function main() {
 
   console.log('\n[1/3] extract — abrindo browser e visitando Vendtef...');
   const data = await extractAll();
-  console.log(`  ✓ ${data.slots.length} slots · ${data.skus.length} SKUs · snapshot capacity=${data.snapshot.capacityFilledPct}%`);
+  console.log(`  ✓ ${data.slots.length} slots · ${data.skus.length} SKUs · ${data.transactions.length} transações · snapshot capacity=${data.snapshot.capacityFilledPct}%`);
 
   console.log('\n[2/3] load — UPSERT no Postgres...');
   const r = await loadAll(data);
-  console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · ${r.dailyRevenueUpserted} dias de faturamento · snapshot ${r.snapshotId.slice(0, 12)}…`);
+  console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · ${r.transactionsAggregatedDays} dias agregados de ${data.transactions.length} transações · snapshot ${r.snapshotId.slice(0, 12)}…`);
 
   console.log('\n[3/3] analytics — sumário do estado atual...');
   const snap = await getLatestSnapshot();
