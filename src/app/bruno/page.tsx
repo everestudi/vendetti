@@ -193,6 +193,9 @@ export default async function BrunoPage() {
                       {' · '}
                       {SOURCE_LABEL[p.source] ?? p.source}
                     </div>
+                    <div className="mt-1">
+                      <SyncBadge p={p} />
+                    </div>
                   </div>
                   <div className="text-right text-lg font-semibold text-navy">
                     {brl(p.totalAmount)}
@@ -205,6 +208,35 @@ export default async function BrunoPage() {
         )}
       </section>
     </main>
+  );
+}
+
+function SyncBadge({
+  p,
+}: {
+  p: { vendtefSyncedAt: Date | null; vendtefSyncError: string | null; vendtefSyncAttempts: number };
+}) {
+  if (p.vendtefSyncedAt) {
+    return (
+      <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+        ✓ Sincronizado no Vendtef
+      </span>
+    );
+  }
+  if (p.vendtefSyncError && p.vendtefSyncAttempts >= 3) {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded bg-rose-100 px-2 py-0.5 text-[10px] font-medium text-rose-800"
+        title={p.vendtefSyncError}
+      >
+        ✗ Falhou ({p.vendtefSyncAttempts}x): {p.vendtefSyncError.slice(0, 40)}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+      ⏳ Aguardando sync Vendtef
+    </span>
   );
 }
 

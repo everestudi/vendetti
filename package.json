@@ -23,7 +23,9 @@
     "mara:sync": "dotenv -e .env.local -- tsx src/lib/vendetti/mara/run.ts",
     "zapi:list-groups": "dotenv -e .env.local -- tsx src/scripts/zapi-list-groups.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
-    "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts"
+    "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts",
+    "vendtef:entrada": "dotenv -e .env.local -- tsx src/scrapers/vendtef/entrada-estoque.ts",
+    "vendtef:entrada-ci": "tsx src/scrapers/vendtef/entrada-estoque.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.79",

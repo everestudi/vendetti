@@ -1,0 +1,53 @@
+name: Vendtef sync
+
+# Roda em 3 gatilhos:
+# - workflow_dispatch: manual via GitHub UI (passa purchase_id ou deixa vazio pra varrer)
+# - repository_dispatch (event_type=vendtef-sync): chamado pelo Vercel após /api/bruno-nfe/confirm
+# - schedule: backup noturno pra pegar qualquer um que escapou
+
+on:
+  workflow_dispatch:
+    inputs:
+      purchase_id:
+        description: 'Purchase ID específico (deixa vazio pra varrer todas pendentes)'
+        required: false
+        type: string
+  repository_dispatch:
+    types: [vendtef-sync]
+  schedule:
+    - cron: '0 6 * * *' # 06:00 UTC = 03:00 BRT — depois do scrape de Mara
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Sync purchase(s)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+          HEADLESS: 'true'
+          PURCHASE_ID: ${{ github.event.inputs.purchase_id || github.event.client_payload.purchase_id || '' }}
+          ALL_PENDING: ${{ (github.event.inputs.purchase_id || github.event.client_payload.purchase_id) && '0' || '1' }}
+        run: npm run vendtef:entrada-ci
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendtef-sync-${{ github.run_id }}
+          path: tmp/vendtef-entrada/
+          retention-days: 7
+          if-no-files-found: ignore

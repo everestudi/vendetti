@@ -193,12 +193,18 @@ model Purchase {
   /// Origem: "ui-upload", "whatsapp-luis", "manual"
   source       String   @default("manual")
   rawParsed    Json?    // saída cru do parser (audit)
+  /// Sync com Vendtef (entrada de estoque + cadastro de produto novo se preciso).
+  /// Setado pelo GH Action `vendtef-sync` rodando Playwright.
+  vendtefSyncedAt   DateTime?
+  vendtefSyncError  String?   @db.Text
+  vendtefSyncAttempts Int       @default(0)
   itens        PurchaseItem[]
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
   @@index([occurredAt])
   @@index([supplier, occurredAt])
+  @@index([vendtefSyncedAt])
 }
 
 model PurchaseItem {

@@ -16,7 +16,32 @@
 
 import { NextResponse } from 'next/server';
 import { prisma } from '@/lib/db';
+import { getSecret } from '@/lib/secrets';
 import type { Supplier } from '@prisma/client';
+
+async function triggerVendtefSync(purchaseId: string): Promise<{ ok: boolean; error?: string }> {
+  const pat = await getSecret('GITHUB_PAT');
+  if (!pat) return { ok: false, error: 'GITHUB_PAT ausente — sync manual via Actions' };
+  const repo = (await getSecret('GITHUB_REPO')) || 'everestudi/vendetti';
+  try {
+    const r = await fetch(`https://api.github.com/repos/${repo}/dispatches`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${pat}`,
+        Accept: 'application/vnd.github+json',
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+      body: JSON.stringify({
+        event_type: 'vendtef-sync',
+        client_payload: { purchase_id: purchaseId },
+      }),
+    });
+    if (!r.ok) return { ok: false, error: `dispatch HTTP ${r.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: (err as Error).message };
+  }
+}
 
 export const runtime = 'nodejs';
 
@@ -120,5 +145,11 @@ export async function POST(req: Request) {
     return p;
   });
 
-  return NextResponse.json({ ok: true, purchaseId: purchase.id });
+  // Dispara sync no Vendtef em background (não bloqueia resposta)
+  const dispatch = await triggerVendtefSync(purchase.id);
+  return NextResponse.json({
+    ok: true,
+    purchaseId: purchase.id,
+    vendtefSync: dispatch.ok ? 'queued' : `not-queued: ${dispatch.error}`,
+  });
 }

@@ -24,6 +24,8 @@ export const KNOWN_SECRETS = [
   { key: 'ZAPI_WEBHOOK_SECRET', label: 'Z-API webhook · shared secret', hint: 'Adicione no header X-Vendetti-Secret na config webhook do Z-API' },
   { key: 'ATACADAO_USER', label: 'Atacadão — usuário (opcional)', hint: 'só se precisar logar p/ ver preço' },
   { key: 'ATACADAO_PASS', label: 'Atacadão — senha (opcional)', hint: '' },
+  { key: 'GITHUB_PAT', label: 'GitHub Personal Access Token', hint: 'Pra disparar workflow Vendtef sync. Scope: repo. github.com/settings/tokens' },
+  { key: 'GITHUB_REPO', label: 'GitHub repo (org/name)', hint: 'Padrão: everestudi/vendetti — só sobrescreva se mover o repo' },
 ] as const;
 
 export type SecretKey = (typeof KNOWN_SECRETS)[number]['key'];
