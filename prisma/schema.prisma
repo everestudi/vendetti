@@ -38,27 +38,51 @@ enum Supplier {
 // === Máquina física ===
 
 model Machine {
-  id        String   @id @default(cuid())
-  name      String // "Bluemall - Estacionamento"
-  model     String // "TCN Pro 6G"
-  location  String
-  active    Boolean  @default(true)
-  slots     Slot[]
-  createdAt DateTime @default(now())
+  id           String              @id @default(cuid())
+  name         String              @unique
+  model        String
+  location     String
+  active       Boolean             @default(true)
+  slots        Slot[]
+  snapshots    InventorySnapshot[]
+  createdAt    DateTime            @default(now())
 }
 
 model Slot {
-  id         String   @id @default(cuid())
-  machineId  String
-  machine    Machine  @relation(fields: [machineId], references: [id])
-  position   String // "A1", "B2", ... ou número conforme Vendtef
-  skuId      String?
-  sku        Sku?     @relation(fields: [skuId], references: [id])
-  capacity   Int      @default(15) // mudou em 14/05/2026 para 15 nas molas de barrinha
-  currentQty Int      @default(0)
-  updatedAt  DateTime @updatedAt
+  id              String   @id @default(cuid())
+  machineId       String
+  machine         Machine  @relation(fields: [machineId], references: [id])
+  /// Identificador da seleção no Vendtef (ex: "1", "11", "33").
+  position        String
+  skuId           String?
+  sku             Sku?     @relation(fields: [skuId], references: [id])
+  capacity        Int      @default(15)
+  currentQty      Int      @default(0)
+  /// Preço de venda (lido do modal Seleções).
+  price           Decimal? @db.Decimal(10, 2)
+  /// Lucro estimado por unidade (lido do Vendtef como "Lucro Estimado").
+  marginEst       Decimal? @db.Decimal(10, 2)
+  qtdeAlerta      Int?
+  qtdeCritico     Int?
+  updatedAt       DateTime @updatedAt
 
   @@unique([machineId, position])
+}
+
+/// Snapshot diário do estado de inventário da máquina.
+model InventorySnapshot {
+  id                String   @id @default(cuid())
+  machineId         String
+  machine           Machine  @relation(fields: [machineId], references: [id])
+  capturedAt        DateTime @default(now())
+  slotsTotal        Int
+  slotsOk           Int
+  slotsAlert        Int
+  slotsCritical     Int
+  /// Percentual de capacidade preenchida (0-100).
+  capacityFilledPct Decimal? @db.Decimal(5, 2)
+
+  @@index([machineId, capturedAt])
 }
 
 // === Vendas e pagamentos ===
