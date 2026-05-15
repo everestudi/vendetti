@@ -31,8 +31,7 @@ export function VendingMachineLive({ slots, capacityPct, slotsCritical, slotsTot
     <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
       {/* --- CARTOON --- */}
       <div className="relative">
-        <Link href="/mara" aria-label="Abrir dashboard">
-          <div className="rounded-2xl border-2 border-navy bg-navy p-3 shadow-xl transition hover:shadow-2xl">
+        <div className="rounded-2xl border-2 border-navy bg-navy p-3 shadow-xl">
             {/* Faixa Vendetti */}
             <div className="mb-2 rounded bg-gold py-1 text-center text-xs font-bold tracking-[0.2em] text-navy">
               VENDETTI
@@ -89,8 +88,7 @@ export function VendingMachineLive({ slots, capacityPct, slotsCritical, slotsTot
                 </div>
               </div>
             )}
-          </div>
-        </Link>
+        </div>
       </div>
 
       {/* --- PAINEL DETALHE --- */}
