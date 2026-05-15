@@ -202,14 +202,59 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCo
     await dismissModals(page);
     await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-01-lista.png`, fullPage: true });
 
-    // Acha link "Cadastrar Produto" / "Novo" / "Adicionar"
-    const novoBtn = page.locator('a:has-text("Cadastrar Produto"), a:has-text("Novo Produto"), a:has-text("Adicionar"), button:has-text("Cadastrar Produto")').first();
-    if (await novoBtn.count() === 0) {
-      return { ok: false, error: 'botão "Cadastrar Produto" não encontrado em /produtos' };
+    // Dump todos botões/links do topo (max 30) pra audit
+    const topActions = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('a, button'))
+        .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .filter((el) => (el as HTMLElement).getBoundingClientRect().top < 250)
+        .map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? '').trim().slice(0, 60),
+          href: (el as HTMLAnchorElement).href ?? '',
+          id: el.id,
+          className: (el as HTMLElement).className.slice(0, 80),
+          title: el.getAttribute('title') ?? '',
+        }))
+        .slice(0, 40);
+    });
+    writeFileSync(`${OUT_DIR}/cad-${slug}-01-topactions.json`, JSON.stringify(topActions, null, 2));
+
+    // Tenta várias estratégias pra abrir cadastro
+    let opened = false;
+    const tryUrls = ['/produtos/cadastrar', '/produtos/cadastro', '/produtos/novo', '/produtos/new'];
+    for (const path of tryUrls) {
+      await page.goto(`https://www.erpvending.com.br${path}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+      const url = page.url();
+      // Se redirecionou pra /produtos (lista), não existe
+      if (!url.match(/\/produtos\/?$/) && !url.includes('404')) {
+        const hasNomeField = await page.locator('input[name="nome"], input[id="nome"], input[name="descricao"]').count();
+        if (hasNomeField > 0) {
+          opened = true;
+          console.log(`  ✓ form de cadastro em ${path}`);
+          break;
+        }
+      }
     }
-    await novoBtn.click();
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-    await page.waitForTimeout(1_500);
+
+    if (!opened) {
+      // Volta pra lista e procura botão de cadastrar de várias formas
+      await page.goto(PRODUTOS_URL, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+      const novoBtn = page.locator(
+        'a:has-text("Cadastrar Produto"), a:has-text("Novo Produto"), a:has-text("Adicionar"), a:has-text("Cadastrar"), a:has-text("Novo"), button:has-text("Cadastrar"), button:has-text("Novo"), a[title*="Cadastr" i], a[title*="Novo" i], .btn-add, .btn-novo, .fa-plus, i.fa-plus',
+      ).first();
+      if (await novoBtn.count() > 0) {
+        await novoBtn.click();
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+        opened = true;
+      }
+    }
+
+    if (!opened) {
+      return { ok: false, error: 'não consegui abrir o form de cadastro de produto — ver cad-*-01-topactions.json' };
+    }
     await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-02-form.png`, fullPage: true });
     await dumpFormFields(page, `cad-${slug}-02-form`);
 
