@@ -1,3 +1,12 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #1F3864;
+  --color-navy-50: #E8ECF4;
+  --color-navy-900: #0F1C32;
+  --color-gold: #C9A84C;
+  --color-gold-50: #F8F2DE;
+  --color-gold-900: #7A6628;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
