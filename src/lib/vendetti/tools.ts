@@ -21,6 +21,7 @@ import {
   MIN_MARGIN_PCT,
 } from './policies';
 import { searchAtacadao } from '../../scrapers/atacadao/search';
+import { sendToOperacaoGroup, sendText } from '../zapi/send';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -482,6 +483,107 @@ export const bruno_compare_with_slot = tool({
   },
 });
 
+// ============================================================
+// Rita — Operações (comunicação Weverton + listas)
+// ============================================================
+
+export const rita_propose_restock = tool({
+  description:
+    'Rita analisa slots críticos da máquina e gera uma pick list pro Weverton repor. Retorna a lista formatada + total de itens. Use quando snapshot indicar muitos slots críticos. NÃO envia ainda — só prepara; pra enviar use rita_send_grupo_operacao.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
+    if (!machine) return { from: 'Rita', error: 'máquina não encontrada' };
+
+    const slots = await prisma.slot.findMany({
+      where: { machineId: machine.id },
+      include: { sku: true },
+      orderBy: { position: 'asc' },
+    });
+
+    // Pra cada slot: heurística "precisa repor?" baseada em qtdeCritico
+    // (não temos currentQty real ainda — usamos vendas dos últimos 7d como proxy de giro)
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+    const items: { selecao: string; product: string; capacity: number; suggestedQty: number; weekSales: number }[] = [];
+
+    for (const s of slots) {
+      if (!s.sku) continue;
+      const sales = await prisma.transaction.count({
+        where: { skuId: s.sku.id, status: 'OK', occurredAt: { gte: sevenDaysAgo } },
+      });
+      // Sugestão: completar até capacidade, considerando giro semanal
+      // Se vendeu N na semana, precisa repor pelo menos N + margem (assume estoque baixo)
+      const suggested = Math.min(s.capacity, Math.max(Math.ceil(sales * 1.5), Math.ceil(s.capacity * 0.6)));
+      if (suggested > 0) {
+        items.push({
+          selecao: s.position,
+          product: s.sku.name,
+          capacity: s.capacity,
+          suggestedQty: suggested,
+          weekSales: sales,
+        });
+      }
+    }
+
+    // Ordena por giro decrescente (prioridade)
+    items.sort((a, b) => b.weekSales - a.weekSales);
+    const top = items.slice(0, 20);
+
+    // Formata mensagem
+    const lines = top.map(
+      (i) => `· Slot ${i.selecao.padStart(2, ' ')}: ${i.suggestedQty}x ${i.product} (cap ${i.capacity}, vendeu ${i.weekSales} essa semana)`,
+    );
+    const message = `🤖 Pick list (sugerida pela Rita):\n${lines.join('\n')}\n\nTotal: ${top.length} slots. Weverton, confere a lista e abastece quando der. 🙏`;
+
+    return {
+      from: 'Rita · Operações',
+      itemsCount: top.length,
+      totalUnits: top.reduce((acc, i) => acc + i.suggestedQty, 0),
+      items: top,
+      messagePreview: message,
+      next: 'Pra enviar pro grupo: chame `rita_send_grupo_operacao(message=messagePreview)`. Pra ajustar antes, edite a mensagem.',
+    };
+  },
+});
+
+export const rita_send_grupo_operacao = tool({
+  description:
+    'Envia mensagem pro grupo "Operação TCN Vending Machine" via Z-API. Use pra lista de reposição, alertas pro Weverton, ou confirmar mudanças que precisam ação física. Luís acompanha o grupo.',
+  inputSchema: z.object({
+    message: z.string().min(5).describe('Texto da mensagem (com quebras de linha se preciso)'),
+  }),
+  execute: async ({ message }) => {
+    const r = await sendToOperacaoGroup(message);
+    if (!r.ok) return { from: 'Rita', error: r.error };
+    return {
+      from: 'Rita · Operações',
+      ok: true,
+      messageId: r.messageId,
+      preview: message.slice(0, 200),
+    };
+  },
+});
+
+export const rita_send_luis = tool({
+  description:
+    'Manda mensagem direta pro WhatsApp do Luís (LUIS_PHONE). Use pra alertas urgentes que NÃO devem ir pro grupo, ou pra "ping" se ele tá vendo o dashboard. Mantenha curto.',
+  inputSchema: z.object({
+    message: z.string().min(5).max(500),
+  }),
+  execute: async ({ message }) => {
+    const luis = await prisma.secret.findUnique({ where: { key: 'LUIS_PHONE' } });
+    if (!luis) return { from: 'Rita', error: 'LUIS_PHONE não configurado' };
+    // Decifra (não posso usar getSecret aqui pra evitar dependency cycle)
+    const { decrypt } = await import('../crypto');
+    const phone = decrypt(luis.value);
+    const r = await sendText(phone, message);
+    if (!r.ok) return { from: 'Rita', error: r.error };
+    return { from: 'Rita · Operações', ok: true, messageId: r.messageId };
+  },
+});
+
 export const VENDETTI_TOOLS = {
   mara_summary,
   mara_margin_buckets,
@@ -494,6 +596,9 @@ export const VENDETTI_TOOLS = {
   zelda_audit_recent,
   bruno_search_atacadao,
   bruno_compare_with_slot,
+  rita_propose_restock,
+  rita_send_grupo_operacao,
+  rita_send_luis,
   decision_create,
   vendetti_propose_slot_change,
 } as const;
