@@ -1,0 +1,137 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { TEAM, avatarUrl, type Agent } from '@/lib/agents/team';
+
+export const dynamic = 'force-static';
+
+export function generateStaticParams() {
+  return TEAM.map((a) => ({ id: a.id }));
+}
+
+const STATUS = {
+  active: { label: '🟢 Ativo', cls: 'bg-emerald-100 text-emerald-800' },
+  building: { label: '🟡 Em construção', cls: 'bg-amber-100 text-amber-800' },
+  planned: { label: '⚪ Planejado', cls: 'bg-navy-50 text-navy/60' },
+} as const;
+
+const COLOR_RING: Record<Agent['color'], string> = {
+  navy: 'ring-navy/30',
+  gold: 'ring-gold/40',
+  emerald: 'ring-emerald-400/40',
+  rose: 'ring-rose-400/40',
+  amber: 'ring-amber-400/40',
+  sky: 'ring-sky-400/40',
+};
+const COLOR_TEXT: Record<Agent['color'], string> = {
+  navy: 'text-navy',
+  gold: 'text-gold-900',
+  emerald: 'text-emerald-700',
+  rose: 'text-rose-700',
+  amber: 'text-amber-700',
+  sky: 'text-sky-700',
+};
+
+export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  const agent = TEAM.find((a) => a.id === id);
+  if (!agent) notFound();
+
+  const supervisor = agent.reportsTo ? TEAM.find((a) => a.id === agent.reportsTo) : null;
+  const subordinates = TEAM.filter((a) => a.reportsTo === agent.id);
+  const status = STATUS[agent.status];
+
+  return (
+    <main className="mx-auto max-w-4xl px-4 py-10">
+      <nav className="mb-6 text-sm">
+        <Link href="/equipe" className="text-navy/60 hover:text-navy">← voltar pra equipe</Link>
+      </nav>
+
+      {/* Header */}
+      <header className="flex flex-col items-start gap-6 sm:flex-row sm:items-center">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={avatarUrl(agent, 192)}
+          alt={agent.name}
+          width={160}
+          height={160}
+          className={`rounded-full ring-4 ${COLOR_RING[agent.color]}`}
+        />
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className={`text-4xl font-bold ${COLOR_TEXT[agent.color]}`}>{agent.name}</h1>
+            <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${status.cls}`}>{status.label}</span>
+          </div>
+          <p className={`mt-1 text-lg font-medium ${COLOR_TEXT[agent.color]} opacity-80`}>{agent.role}</p>
+          <p className="mt-2 text-base italic text-navy/60">"{agent.tagline}"</p>
+          {agent.fullName && (
+            <p className="mt-1 text-xs text-navy/45">Nome formal: <strong>{agent.fullName}</strong></p>
+          )}
+        </div>
+      </header>
+
+      {/* Sobre */}
+      <section className="mt-8 rounded-lg border border-navy/10 bg-white p-6">
+        <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">Sobre</h2>
+        <p className="mt-2 text-base leading-relaxed text-navy/85">{agent.description}</p>
+      </section>
+
+      {/* O que faz + Ferramentas */}
+      <div className="mt-6 grid gap-6 sm:grid-cols-2">
+        <section className="rounded-lg border border-navy/10 bg-white p-6">
+          <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">O que faz</h2>
+          <ul className="mt-3 space-y-2 text-sm text-navy/80">
+            {agent.responsibilities.map((r) => (
+              <li key={r} className="flex items-start gap-2">
+                <span className="text-navy/30">·</span>
+                <span>{r}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section className="rounded-lg border border-navy/10 bg-white p-6">
+          <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">Ferramentas</h2>
+          <ul className="mt-3 space-y-1.5 font-mono text-xs text-navy/70">
+            {agent.tools.map((t) => (
+              <li key={t}>· {t}</li>
+            ))}
+          </ul>
+        </section>
+      </div>
+
+      {/* Hierarquia */}
+      {(supervisor || subordinates.length > 0) && (
+        <section className="mt-6 rounded-lg border border-navy/10 bg-white p-6">
+          <h2 className="text-base font-semibold uppercase tracking-wide text-navy/50">Hierarquia</h2>
+          {supervisor && (
+            <p className="mt-2 text-sm text-navy/75">
+              Reporta a:{' '}
+              <Link href={`/equipe/${supervisor.id}`} className="font-semibold text-navy hover:underline">
+                {supervisor.name}
+              </Link>{' '}
+              ({supervisor.role})
+            </p>
+          )}
+          {subordinates.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs uppercase tracking-wide text-navy/45">Coordena</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {subordinates.map((sub) => (
+                  <Link
+                    key={sub.id}
+                    href={`/equipe/${sub.id}`}
+                    className="inline-flex items-center gap-2 rounded-full border border-navy/15 bg-navy-50 px-3 py-1 text-xs font-medium text-navy hover:bg-navy/10"
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={avatarUrl(sub, 48)} alt={sub.name} className="h-5 w-5 rounded-full" />
+                    {sub.name} · {sub.role.split(' · ')[0].split('/')[0].trim()}
+                  </Link>
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+    </main>
+  );
+}

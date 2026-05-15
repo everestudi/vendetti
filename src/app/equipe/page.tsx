@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { TEAM, CEO, SUB_AGENTS, avatarUrl, type Agent } from '@/lib/agents/team';
 
 export const dynamic = 'force-static';
@@ -73,8 +74,9 @@ function AgentCard({ agent, featured }: { agent: Agent; featured?: boolean }) {
   const size = featured ? 144 : 88;
 
   return (
-    <article
-      className={`rounded-2xl border border-navy/10 bg-white p-5 shadow-sm transition hover:shadow-md ${
+    <Link
+      href={`/equipe/${agent.id}`}
+      className={`block rounded-2xl border border-navy/10 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-navy/25 hover:shadow-md ${
         featured ? 'w-full max-w-md text-center' : ''
       }`}
     >
@@ -122,6 +124,8 @@ function AgentCard({ agent, featured }: { agent: Agent; featured?: boolean }) {
           </ul>
         </div>
       </div>
-    </article>
+
+      <div className="mt-4 text-right text-xs font-semibold text-navy/40">ver perfil →</div>
+    </Link>
   );
 }
