@@ -563,6 +563,87 @@ export const rita_log_restock = tool({
   },
 });
 
+export const rita_parse_weverton_message = tool({
+  description:
+    'Parsea mensagem de reposição do Weverton no formato dele:\n  "Boa tarde DD/MM/AAAA\\nReposição\\n\\n(02) Biz xtra Black\\n6 unidades\\n\\n(35) Água normal\\n5 unidades"\n\nRetorna lista estruturada {slotPosition, productGuess, qty} + match heurístico com SKU do slot. NÃO registra — só extrai pra revisão. Depois use rita_log_restock pra gravar.',
+  inputSchema: z.object({
+    text: z.string().min(10).describe('Mensagem bruta colada do WhatsApp do Weverton'),
+  }),
+  execute: async ({ text }) => {
+    const lines = text.split('\n').map((l) => l.trim());
+    const items: {
+      slotPosition: string;
+      productGuess: string;
+      qty: number;
+      slotProduct: string | null;
+      matchConfidence: 'high' | 'mid' | 'low' | 'no-slot';
+    }[] = [];
+
+    const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
+    if (!machine) return { from: 'Rita', error: 'máquina não encontrada' };
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!line) continue;
+      // Match "(02) Nome" / "02) Nome" / "02 - Nome" / "02: Nome"
+      const headerMatch = /^\(?(\d{1,3})\)?\s*[-:]?\s*(.+)$/.exec(line);
+      if (!headerMatch) continue;
+      const slotPosition = headerMatch[1];
+      const productGuess = headerMatch[2].trim();
+      if (productGuess.length < 3) continue;
+
+      // procura "N unidades" nas próximas linhas (skip vazias)
+      let qty = 0;
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        const ln = lines[j];
+        if (!ln) continue;
+        const qtyMatch = /^(\d+)\s*(?:un|unid|unidad)/i.exec(ln);
+        if (qtyMatch) {
+          qty = parseInt(qtyMatch[1], 10);
+          break;
+        }
+        // se chegou em outra linha que parece header de produto, para
+        if (/^\(?\d/.test(ln)) break;
+      }
+      if (qty === 0) continue;
+
+      // Match com SKU do slot
+      const slot = await prisma.slot.findFirst({
+        where: { machineId: machine.id, position: slotPosition },
+        include: { sku: true },
+      });
+      const slotProduct = slot?.sku?.name ?? null;
+      let matchConfidence: 'high' | 'mid' | 'low' | 'no-slot' = 'no-slot';
+      if (slotProduct) {
+        const guess = productGuess.toLowerCase();
+        const real = slotProduct.toLowerCase();
+        const tokens = guess.split(/\s+/).filter((t) => t.length > 3);
+        const matched = tokens.filter((t) => real.includes(t));
+        if (matched.length === tokens.length && tokens.length > 0) matchConfidence = 'high';
+        else if (matched.length > 0) matchConfidence = 'mid';
+        else matchConfidence = 'low';
+      }
+
+      items.push({ slotPosition, productGuess, qty, slotProduct, matchConfidence });
+    }
+
+    const totalUnits = items.reduce((s, i) => s + i.qty, 0);
+    const lowConfidence = items.filter((i) => i.matchConfidence === 'low' || i.matchConfidence === 'no-slot');
+
+    return {
+      from: 'Rita · Operações',
+      parsed: items.length,
+      totalUnits,
+      items,
+      warnings:
+        lowConfidence.length > 0
+          ? `⚠️ ${lowConfidence.length} slot(s) com baixa confiança no match — confirme antes de registrar.`
+          : null,
+      next: 'Se tudo bate, chame rita_log_restock com items=[{slotPosition, qty}, ...].',
+    };
+  },
+});
+
 export const rita_register_purchase = tool({
   description:
     'Registra COMPRA de produtos (entrada de estoque central/Everest). Cria/atualiza SKUs no DB. Use quando Bruno fechar uma compra no Atacadão/Vittal, ou quando Luís encaminhar uma NF-e. Cada item tem produto, qty, custo unitário. Atualiza Sku.cost e marginPct.',
@@ -734,6 +815,7 @@ export const VENDETTI_TOOLS = {
   zelda_audit_recent,
   bruno_search_atacadao,
   bruno_compare_with_slot,
+  rita_parse_weverton_message,
   rita_log_restock,
   rita_register_purchase,
   rita_propose_restock,
