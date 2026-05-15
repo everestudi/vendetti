@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getLatestSnapshot, getSlotCount, getSkuCount } from '@/lib/vendetti/mara/analytics';
+import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { SprintProgress } from '@/components/SprintProgress';
@@ -9,16 +9,11 @@ import { TEAM, avatarUrl } from '@/lib/agents/team';
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const [snap, slotCount, skuCount, slots] = await Promise.all([
-    getLatestSnapshot(),
-    getSlotCount(),
-    getSkuCount(),
-    getSlotsWithMargin(),
-  ]);
+  const [snap, slots] = await Promise.all([getLatestSnapshot(), getSlotsWithMargin()]);
 
   const capacityPct = snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : 0;
   const critical = snap?.slotsCritical ?? 0;
-  const total = snap?.slotsTotal ?? slotCount;
+  const total = snap?.slotsTotal ?? slots.length;
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
@@ -34,18 +29,6 @@ export default async function Home() {
           Um time de 6 agentes (Claude Opus 4.7) operando a TCN Pro 6G no Blue Mall Rondon: análise de
           dados, compras, atendimento, operações de campo, oversight e orquestração.
         </p>
-
-        {/* KPIs */}
-        <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Kpi label="SKUs" value={skuCount} />
-          <Kpi label="Slots" value={total} />
-          <Kpi
-            label="Capacidade"
-            value={`${capacityPct.toFixed(0)}%`}
-            tone={capacityPct < 40 ? 'red' : capacityPct < 70 ? 'amber' : 'emerald'}
-          />
-          <Kpi label="Críticos" value={critical} tone={critical > 0 ? 'red' : 'emerald'} />
-        </div>
       </section>
 
       {/* TIME */}
@@ -143,16 +126,3 @@ export default async function Home() {
   );
 }
 
-function Kpi({ label, value, tone }: { label: string; value: string | number; tone?: 'red' | 'amber' | 'emerald' }) {
-  const toneCls = {
-    red: 'text-rose-700',
-    amber: 'text-amber-700',
-    emerald: 'text-emerald-700',
-  } as const;
-  return (
-    <div className="rounded-lg border border-navy/10 bg-white px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wide text-navy/50">{label}</div>
-      <div className={`text-xl font-bold ${tone ? toneCls[tone] : 'text-navy'}`}>{value}</div>
-    </div>
-  );
-}
