@@ -29,6 +29,7 @@ export function Header() {
         <nav className="flex items-center gap-6">
           <NavLink href="/" label="Home" />
           <NavLink href="/chat" label="Chat" />
+          <NavLink href="/decisions" label="Decisões" />
           <NavLink href="/mara" label="Mara" />
           <NavLink href="/equipe" label="Equipe" />
           <NavLink href="/settings" label="Settings" />
