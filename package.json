@@ -1,0 +1,47 @@
+{
+  "name": "vendetti",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Augusto Vendetti — agente CEO da vending machine TCN Pro 6G no Blue Mall Rondon",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:push": "prisma db push",
+    "db:studio": "prisma studio",
+    "db:generate": "prisma generate",
+    "scrape:login": "tsx src/scrapers/vendtef/login.ts",
+    "scrape:sales": "tsx src/scrapers/vendtef/sales.ts",
+    "scrape:inventory": "tsx src/scrapers/vendtef/inventory.ts",
+    "agent:tick": "tsx src/lib/augusto/tick.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.5.0",
+    "@anthropic-ai/sdk": "^0.65.0",
+    "@prisma/client": "^5.22.0",
+    "ai": "^4.0.18",
+    "lucide-react": "^0.469.0",
+    "next": "15.1.3",
+    "next-auth": "5.0.0-beta.25",
+    "playwright": "^1.49.1",
+    "react": "19.0.0",
+    "react-dom": "19.0.0",
+    "recharts": "^2.15.0",
+    "resend": "^4.0.1",
+    "tailwind-merge": "^2.5.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/react": "^19.0.2",
+    "@types/react-dom": "^19.0.2",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}

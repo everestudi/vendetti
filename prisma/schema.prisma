@@ -1,0 +1,207 @@
+// Augusto Vendetti — schema inicial.
+// Foco em: catálogo, slots da máquina, transações, reposições, decision log.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// === Catálogo ===
+
+model Sku {
+  id              String   @id @default(cuid())
+  code            String   @unique // código no Vendtef
+  name            String
+  category        String   // bebida, barrinha, salgadinho, doce, ...
+  supplier        Supplier
+  supplierSkuCode String?  // ref no Atacadão / Vittal
+  cost            Decimal  @db.Decimal(10, 2)
+  price           Decimal  @db.Decimal(10, 2)
+  marginPct       Decimal? @db.Decimal(5, 2) // (price - cost) / price * 100
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  slots           Slot[]
+  transactions    Transaction[]
+  reposicoes      ReposicaoItem[]
+}
+
+enum Supplier {
+  ATACADAO
+  VITTAL
+  OUTRO
+}
+
+// === Máquina física ===
+
+model Machine {
+  id        String   @id @default(cuid())
+  name      String // "Bluemall - Estacionamento"
+  model     String // "TCN Pro 6G"
+  location  String
+  active    Boolean  @default(true)
+  slots     Slot[]
+  createdAt DateTime @default(now())
+}
+
+model Slot {
+  id         String   @id @default(cuid())
+  machineId  String
+  machine    Machine  @relation(fields: [machineId], references: [id])
+  position   String // "A1", "B2", ... ou número conforme Vendtef
+  skuId      String?
+  sku        Sku?     @relation(fields: [skuId], references: [id])
+  capacity   Int      @default(15) // mudou em 14/05/2026 para 15 nas molas de barrinha
+  currentQty Int      @default(0)
+  updatedAt  DateTime @updatedAt
+
+  @@unique([machineId, position])
+}
+
+// === Vendas e pagamentos ===
+
+model Transaction {
+  id          String   @id @default(cuid())
+  vendpagoId  String?  @unique // id da transação no Vendpago
+  occurredAt  DateTime
+  skuId       String?
+  sku         Sku?     @relation(fields: [skuId], references: [id])
+  slotPosition String?
+  qty         Int      @default(1)
+  grossAmount Decimal  @db.Decimal(10, 2)
+  netAmount   Decimal? @db.Decimal(10, 2)
+  paymentType String?  // pix, credito, debito, aproximacao
+  status      TransactionStatus @default(OK)
+  rawJson     Json?
+  createdAt   DateTime @default(now())
+
+  @@index([occurredAt])
+  @@index([skuId, occurredAt])
+}
+
+enum TransactionStatus {
+  OK
+  FAILED       // pagou e não saiu
+  REFUNDED
+  COMPLAINT    // reclamação registrada
+}
+
+// === Reposições (físicas, feitas pelo Weverton) ===
+
+model Reposicao {
+  id          String   @id @default(cuid())
+  occurredAt  DateTime @default(now())
+  reportedBy  String   // "weverton", "neto"
+  source      Source   @default(WHATSAPP_AUGUSTO)
+  notes       String?
+  photoUrl    String?
+  itens       ReposicaoItem[]
+  syncedAt    DateTime? // quando o Augusto refletiu no Vendtef
+  createdAt   DateTime @default(now())
+}
+
+enum Source {
+  WHATSAPP_LUIS
+  WHATSAPP_AUGUSTO
+  PWA_OPERADOR
+  MANUAL
+}
+
+model ReposicaoItem {
+  id            String    @id @default(cuid())
+  reposicaoId   String
+  reposicao     Reposicao @relation(fields: [reposicaoId], references: [id], onDelete: Cascade)
+  skuId         String
+  sku           Sku       @relation(fields: [skuId], references: [id])
+  slotPosition  String?
+  qty           Int
+}
+
+// === Decision log do Augusto (append-only) ===
+
+model Decision {
+  id          String   @id @default(cuid())
+  createdAt   DateTime @default(now())
+  kind        DecisionKind
+  level       AutonomyLevel // GREEN, YELLOW, RED
+  summary     String
+  rationale   String       @db.Text
+  data        Json         // input/output da decisão
+  status      DecisionStatus @default(PENDING)
+  executedAt  DateTime?
+  approvedBy  String?
+  rejectedBy  String?
+  rejectReason String?
+
+  @@index([createdAt])
+  @@index([kind, status])
+}
+
+enum DecisionKind {
+  PRICE_CHANGE
+  RESTOCK_ORDER          // compra no fornecedor
+  RESTOCK_TASK           // tarefa pro Weverton
+  SLOT_REORG
+  SKU_ADD
+  SKU_REMOVE
+  REFUND
+  COMPLAINT_RESPONSE
+  SYSTEM_INVENTORY_SYNC  // alimentar Vendtef após reposição
+  OTHER
+}
+
+enum AutonomyLevel {
+  GREEN  // Augusto executa sozinho
+  YELLOW // 1-clique do Luís
+  RED    // chat obrigatório
+}
+
+enum DecisionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXECUTED
+  FAILED
+}
+
+// === Reclamações ===
+
+model Complaint {
+  id           String   @id @default(cuid())
+  receivedAt   DateTime @default(now())
+  source       String   // "whatsapp-corporativo", "manual", ...
+  customerNote String   @db.Text
+  transactionId String?
+  resolution   String?  @db.Text
+  resolvedAt   DateTime?
+  refundAmount Decimal? @db.Decimal(10, 2)
+}
+
+// === Secrets (cifrados em AES-256-GCM com chave derivada de AUTH_SECRET) ===
+
+model Secret {
+  key       String   @id // ex: "ANTHROPIC_API_KEY"
+  value     String   @db.Text // ciphertext base64 (iv|tag|data)
+  updatedAt DateTime @updatedAt
+  updatedBy String?
+}
+
+// === Auth (NextAuth) ===
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now())
+}
+
+enum Role {
+  ADMIN     // Luís
+  OPERADOR  // Weverton
+  VIEWER
+}
