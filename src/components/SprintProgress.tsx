@@ -88,10 +88,10 @@ export const SPRINTS: Sprint[] = [
     subtitle: 'Rita, Lúcia, Bruno, Zelda',
     items: [
       { label: 'Rita — visão da máquina em /equipe/rita', done: true },
+      { label: 'Zelda — oversight integrado (3 tools no agent: check_proposal, policy_limits, audit_recent)', done: true },
       { label: 'Rita — tools de cadastro/swap/abastecimento Vendtef', done: false },
       { label: 'Lúcia — webhook SAC + state machine reclamação', done: false },
       { label: 'Bruno — pesquisa Atacadão online + comparativo Vittal', done: false },
-      { label: 'Zelda — oversight integrado (policies.ts no agent loop)', done: false },
     ],
   },
   {
