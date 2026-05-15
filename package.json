@@ -21,7 +21,10 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.142",
     "@anthropic-ai/sdk": "^0.96.0",
+    "@neondatabase/serverless": "^1.1.0",
+    "@prisma/adapter-neon": "^7.8.0",
     "@prisma/client": "^7.8.0",
+    "dotenv": "^17.4.2",
     "ai": "^6.0.182",
     "lucide-react": "^1.16.0",
     "next": "^16.2.6",

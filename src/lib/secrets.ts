@@ -5,10 +5,8 @@
  *   const anthropicKey = await getSecret('ANTHROPIC_API_KEY');
  */
 
-import { PrismaClient } from '@prisma/client';
+import { prisma } from './db';
 import { decrypt, encrypt } from './crypto';
-
-const prisma = new PrismaClient();
 
 /** Lista de secrets que o app espera. Usado pela UI /settings. */
 export const KNOWN_SECRETS = [
