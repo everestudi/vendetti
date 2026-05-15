@@ -217,6 +217,17 @@ function SyncBadge({
   p: { vendtefSyncedAt: Date | null; vendtefSyncError: string | null; vendtefSyncAttempts: number };
 }) {
   if (p.vendtefSyncedAt) {
+    // Sucesso parcial: tem warning em vendtefSyncError mesmo com syncedAt setado
+    if (p.vendtefSyncError) {
+      return (
+        <span
+          className="inline-flex items-center gap-1 rounded bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-800"
+          title={p.vendtefSyncError}
+        >
+          ⚠️ Vendtef parcial · {p.vendtefSyncError.slice(0, 60)}
+        </span>
+      );
+    }
     return (
       <span className="inline-flex items-center gap-1 rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
         ✓ Sincronizado no Vendtef

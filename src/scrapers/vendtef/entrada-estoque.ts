@@ -60,11 +60,10 @@ async function freshLogin(ctx: BrowserContext) {
   await page.close();
 }
 
-interface ItemSnap {
-  productName: string;
-  productCode: string | null;
-  qty: number;
-  unitCost: number;
+interface SyncResult {
+  ok: boolean;
+  error?: string;
+  warning?: string;
 }
 
 interface PurchaseSnap {
@@ -181,7 +180,7 @@ async function dumpFormFields(page: Page, label: string) {
   console.log(`  dump: ${OUT_DIR}/${label}-fields.json (${fields.length} elementos)`);
 }
 
-async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ ok: boolean; error?: string }> {
+async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<SyncResult> {
   const page = await ctx.newPage();
   page.setDefaultTimeout(30_000);
   try {
@@ -296,28 +295,43 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
 
     // Confirma no modal
     const confirmBtn = page.locator('.modal:visible button:has-text("Confirmar"), [role="dialog"]:visible button:has-text("Confirmar"), button.btn-primary:has-text("Confirmar")').first();
-    if (await confirmBtn.count() > 0) {
-      await confirmBtn.click({ force: true });
-      await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
-      await page.waitForTimeout(2_500);
-    } else {
-      console.log('  ⚠️ modal de confirmação não apareceu — verificar 04-modal-confirm.png');
+    if (await confirmBtn.count() === 0) {
+      return { ok: false, error: 'modal de confirmação não apareceu — submit pode ter falhado' };
     }
+    await confirmBtn.click({ force: true });
+    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(2_500);
     await page.screenshot({ path: `${OUT_DIR}/05-after-confirm.png`, fullPage: true });
 
-    // Sucesso: redirect ou mensagem de sucesso
-    const finalUrl = page.url();
-    const successMsg = await page.locator('.alert-success, .toast-success, [class*="success"]').first().textContent({ timeout: 1_000 }).catch(() => null);
-    const errMsg = await page.locator('.alert-danger, .toast-error, [class*="error"]').first().textContent({ timeout: 1_000 }).catch(() => null);
+    // Verifica mensagem de sucesso/erro no modal final
+    const successText = await page
+      .locator('.modal:visible, [role="dialog"]:visible')
+      .first()
+      .textContent({ timeout: 2_000 })
+      .catch(() => '');
+    const hasSuccess = /sucesso|configurada e iniciada|conclu[ií]da/i.test(successText ?? '');
+    const hasError = /erro|falhou|invalida/i.test(successText ?? '');
 
-    if (errMsg && errMsg.trim()) {
-      return { ok: false, error: `Vendtef: ${errMsg.slice(0, 200)}` };
+    if (hasError) {
+      return { ok: false, error: `Vendtef: ${(successText ?? '').slice(0, 200)}` };
     }
+    if (!hasSuccess) {
+      return { ok: false, error: `confirm: status ambíguo — ${(successText ?? '').slice(0, 200)}` };
+    }
+
+    // Fecha o modal de sucesso (não-blocking)
+    await page
+      .locator('.modal:visible button:has-text("Fechar"), [role="dialog"]:visible button:has-text("Fechar")')
+      .first()
+      .click({ force: true, timeout: 3_000 })
+      .catch(() => undefined);
 
     if (unmatched.length > 0) {
-      return { ok: false, error: `parcial: ${matched.length} OK no Vendtef, ${unmatched.length} sem match (revisar manual)` };
+      return {
+        ok: true,
+        warning: `${matched.length} ok, ${unmatched.length} sem match no Vendtef (cadastrar produto): ${unmatched.map((u) => u.ourName).join(', ').slice(0, 200)}`,
+      };
     }
-    console.log(`  ✓ finalUrl=${finalUrl} ${successMsg ? `msg="${successMsg.slice(0, 80)}"` : ''}`);
     return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -391,11 +405,13 @@ async function main() {
         where: { id },
         data: {
           vendtefSyncedAt: result.ok ? new Date() : null,
-          vendtefSyncError: result.ok ? null : result.error,
+          // Em sucesso com warning, mantém a nota no campo de erro (UI distingue
+          // sucesso parcial via badge condicional)
+          vendtefSyncError: result.ok ? result.warning ?? null : result.error ?? null,
           vendtefSyncAttempts: { increment: 1 },
         },
       });
-      if (result.ok) console.log(`  ✓ ${id}`);
+      if (result.ok) console.log(`  ✓ ${id}${result.warning ? ` (warning: ${result.warning})` : ''}`);
       else console.log(`  ✗ ${id}: ${result.error}`);
     }
   } finally {
