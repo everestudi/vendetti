@@ -2,7 +2,7 @@
   "name": "vendetti",
   "version": "0.1.0",
   "private": true,
-  "description": "Augusto Vendetti — agente CEO da vending machine TCN Pro 6G no Blue Mall Rondon",
+  "description": "Vendetti — agente CEO da vending machine TCN Pro 6G no Blue Mall Rondon (nome formal: Augusto Vendetti)",
   "scripts": {
     "setup": "bash scripts/setup.sh",
     "dev": "next dev",
@@ -16,7 +16,7 @@
     "scrape:login": "dotenv -e .env.local -- tsx src/scrapers/vendtef/login.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "scrape:inventory": "dotenv -e .env.local -- tsx src/scrapers/vendtef/inventory.ts",
-    "agent:tick": "dotenv -e .env.local -- tsx src/lib/augusto/tick.ts"
+    "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.142",

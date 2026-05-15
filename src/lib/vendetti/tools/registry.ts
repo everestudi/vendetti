@@ -1,5 +1,5 @@
 /**
- * Tool registry do Augusto.
+ * Tool registry do Vendetti.
  *
  * Cada tool tem: nome, schema Zod do input, descrição (que o modelo lê), e a função.
  * Pluga no Claude Agent SDK como `tools: TOOLS`.

@@ -24,7 +24,7 @@ export function Header() {
     <header className="border-b border-navy/10 bg-white">
       <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
         <Link href="/" className="font-bold text-navy">
-          Augusto Vendetti
+          Vendetti
         </Link>
         <nav className="flex items-center gap-6">
           <NavLink href="/" label="Home" />

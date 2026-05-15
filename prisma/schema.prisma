@@ -1,4 +1,4 @@
-// Augusto Vendetti — schema inicial.
+// Vendetti — schema inicial.
 // Foco em: catálogo, slots da máquina, transações, reposições, decision log.
 
 generator client {
@@ -99,7 +99,7 @@ model Reposicao {
   notes       String?
   photoUrl    String?
   itens       ReposicaoItem[]
-  syncedAt    DateTime? // quando o Augusto refletiu no Vendtef
+  syncedAt    DateTime? // quando o Vendetti refletiu no Vendtef
   createdAt   DateTime @default(now())
 }
 
@@ -120,7 +120,7 @@ model ReposicaoItem {
   qty           Int
 }
 
-// === Decision log do Augusto (append-only) ===
+// === Decision log do Vendetti (append-only) ===
 
 model Decision {
   id          String   @id @default(cuid())
@@ -154,7 +154,7 @@ enum DecisionKind {
 }
 
 enum AutonomyLevel {
-  GREEN  // Augusto executa sozinho
+  GREEN  // Vendetti executa sozinho
   YELLOW // 1-clique do Luís
   RED    // chat obrigatório
 }

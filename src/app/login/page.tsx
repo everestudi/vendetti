@@ -10,7 +10,7 @@ export default async function LoginPage({
     <main className="flex min-h-screen items-center justify-center bg-navy-50 px-6">
       <form action={login} className="w-full max-w-sm space-y-4 rounded-lg border border-gold/30 bg-white p-6 shadow">
         <div>
-          <h1 className="text-2xl font-bold text-navy">Augusto Vendetti</h1>
+          <h1 className="text-2xl font-bold text-navy">Vendetti</h1>
           <p className="text-sm text-navy/60">Entre para configurar.</p>
         </div>
         <input type="hidden" name="next" value={sp.next ?? '/'} />

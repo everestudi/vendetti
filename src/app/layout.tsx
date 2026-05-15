@@ -3,7 +3,7 @@ import { Header } from '@/components/Header';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'Augusto Vendetti',
+  title: 'Vendetti',
   description: 'CEO autônomo da vending machine do Blue Mall Rondon',
 };
 

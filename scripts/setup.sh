@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Setup interativo do Augusto Vendetti.
+# Setup interativo do Vendetti.
 # Você cola valores no SEU terminal local — nada trafega por chat de IA.
 #
 
@@ -11,7 +11,7 @@ cd "$(dirname "$0")/.."
 cat <<'BANNER'
 
   ╔══════════════════════════════════════════════════════╗
-  ║   Augusto Vendetti — setup local                     ║
+  ║   Vendetti — setup local                             ║
   ╚══════════════════════════════════════════════════════╝
 
 BANNER

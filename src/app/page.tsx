@@ -12,7 +12,7 @@ export default async function Home() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-3xl font-bold text-navy">Augusto Vendetti</h1>
+      <h1 className="text-3xl font-bold text-navy">Vendetti</h1>
       <p className="mt-1 text-navy/60">CEO autônomo · Blue Mall Rondon</p>
 
       {/* Card configuração */}
@@ -29,7 +29,7 @@ export default async function Home() {
             <p className="mt-3 text-sm text-navy/70">
               {anthropicMissing ? (
                 <>
-                  <strong>Anthropic API key</strong> ainda não está configurada. Sem ela, o Augusto não consegue
+                  <strong>Anthropic API key</strong> ainda não está configurada. Sem ela o Vendetti não consegue
                   raciocinar — comece por aí.
                 </>
               ) : (
@@ -63,7 +63,7 @@ export default async function Home() {
             <span className="font-semibold">3.</span> Catálogo de SKUs seedado no banco
           </li>
           <li>
-            <span className="font-semibold">4.</span> Primeiro tick diário do Augusto + email
+            <span className="font-semibold">4.</span> Primeiro tick diário do Vendetti + email
           </li>
         </ol>
       </section>
@@ -72,7 +72,7 @@ export default async function Home() {
       <section className="mt-6 rounded-lg border border-navy/10 bg-white p-6 shadow-sm">
         <h2 className="text-lg font-semibold text-navy">Decision log</h2>
         <p className="mt-2 text-sm text-navy/60">
-          Augusto registra cada decisão (preço, reposição, slot) com nível 🟢🟡🔴, racional e status. Vai aparecer
+          Vendetti registra cada decisão (preço, reposição, slot) com nível 🟢🟡🔴, racional e status. Vai aparecer
           aqui assim que ele começar a operar.
         </p>
       </section>

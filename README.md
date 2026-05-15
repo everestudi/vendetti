@@ -1,7 +1,9 @@
-# Augusto Vendetti
+# Vendetti
 
 > Agente CEO autônomo (Claude Opus 4.7) que opera a vending machine TCN Pro 6G no Blue Mall Rondon.
 > Inspirado no [Project Vend Phase 2](https://www.anthropic.com/research/project-vend-2) da Anthropic.
+>
+> _Nome formal completo: **Augusto Vendetti** — usado apenas em assinaturas finais de email._
 
 ## Arquitetura
 
@@ -76,7 +78,7 @@ npm run dev
 | `npm run scrape:login` | Smoke test: loga no Vendtef e captura screenshot |
 | `npm run scrape:sales` | Baixa relatório de vendas |
 | `npm run scrape:inventory` | Lê inventário atual |
-| `npm run agent:tick` | Executa um tick manual do Augusto |
+| `npm run agent:tick` | Executa um tick manual do Vendetti |
 | `npm run db:studio` | UI do Prisma |
 
 ## Faseamento (4 sprints)
@@ -89,11 +91,11 @@ Decisões arquiteturais e operacionais são versionadas em append-only no vault:
 
 ## Project Vend learnings aplicados
 
-O Claudius (Anthropic) deu prejuízo na Phase 1 por 5 motivos. Como Augusto mitiga cada um:
+O Claudius (Anthropic) deu prejuízo na Phase 1 por 5 motivos. Como o Vendetti mitiga cada um:
 
 | Phase 1 falhou em | Mitigação no Vendetti |
 |---|---|
-| Vendia abaixo do custo | `policies.ts` impõe **margem mínima 35%** — Augusto não pode aprovar preço que viole |
+| Vendia abaixo do custo | `policies.ts` impõe **margem mínima 35%** — Vendetti não pode aprovar preço que viole |
 | Dava desconto pra qualquer um | Vending física, cliente não conversa com IA → vetor de prompt injection ~zero |
 | Hallucinou contas Venmo, contatos | Tools rígidas — não há "ferramenta de transferência genérica"; só ações dentro do ERP |
 | Esqueceu lições anteriores | Decision log append-only + Obsidian + Postgres → contexto persistente |

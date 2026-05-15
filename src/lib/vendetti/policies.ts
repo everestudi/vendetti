@@ -1,5 +1,5 @@
 /**
- * Matriz de autonomia do Augusto (DEC-002).
+ * Matriz de autonomia do Vendetti (DEC-002).
  *
  * Camada de oversight: toda ação proposta passa por `evaluatePolicy()` antes de executar.
  * Retorna o nível 🟢🟡🔴 e a razão. O agent loop respeita isso obrigatoriamente.
@@ -103,6 +103,6 @@ export function evalSkuChange(): PolicyResult {
 }
 
 export function evalInventorySync(): PolicyResult {
-  // Augusto alimentando Vendtef após Weverton repor — 🟢
+  // Vendetti alimentando Vendtef após Weverton repor — 🟢
   return { level: 'GREEN', reason: 'Sincronização passiva (espelha mundo real).' };
 }
