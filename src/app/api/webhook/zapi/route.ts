@@ -32,11 +32,14 @@ interface ZapiPayload {
 }
 
 export async function POST(req: Request) {
-  // Auth opcional via header
+  // Auth opcional: header OU query string (?secret=...) — Z-API não suporta header customizado
   const expected = await getSecret('ZAPI_WEBHOOK_SECRET');
   if (expected) {
-    const got = req.headers.get('x-vendetti-secret');
-    if (got !== expected) {
+    const url = new URL(req.url);
+    const fromHeader = req.headers.get('x-vendetti-secret');
+    const fromQuery = url.searchParams.get('secret');
+    const provided = fromHeader ?? fromQuery;
+    if (provided !== expected) {
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
   }
