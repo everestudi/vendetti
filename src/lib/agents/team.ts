@@ -226,7 +226,7 @@ export const TEAM: Agent[] = [
     avatarSeed: 'Zelda-Nogueira-SP-Auditoria',
     avatarOptions: {
       skinColor: 'ecad80',
-      hair: 'short21',
+      hair: 'short17',
       hairColor: '6e6e6e',
       glasses: 'variant04',
       mouth: 'variant04',
