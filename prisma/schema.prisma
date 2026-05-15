@@ -268,6 +268,25 @@ model Secret {
   updatedBy String?
 }
 
+// === Caixa de ideias (Luís joga, discutimos depois) ===
+
+model Idea {
+  id         String     @id @default(cuid())
+  content    String     @db.Text
+  status     IdeaStatus @default(NEW)
+  /// Nota opcional quando resolvida (ex: "entrou no Sprint 7", "rejeitado pq X").
+  note       String?    @db.Text
+  createdAt  DateTime   @default(now())
+  resolvedAt DateTime?
+
+  @@index([status, createdAt])
+}
+
+enum IdeaStatus {
+  NEW
+  RESOLVED
+}
+
 // === Auth (NextAuth) ===
 
 model User {

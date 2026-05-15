@@ -32,6 +32,7 @@ export function Header() {
           <NavLink href="/decisions" label="Decisões" />
           <NavLink href="/mara" label="Mara" />
           <NavLink href="/equipe" label="Equipe" />
+          <NavLink href="/ideias" label="Ideias" />
           <NavLink href="/settings" label="Settings" />
           <form action={logout}>
             <button type="submit" className="text-sm text-navy/60 transition-colors hover:text-navy">
