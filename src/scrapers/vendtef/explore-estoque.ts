@@ -70,6 +70,45 @@ async function main() {
     console.log(`${estoqueLinks.length} links relacionados a estoque/operação/inventário`);
     for (const l of estoqueLinks.slice(0, 30)) console.log(`  ${l.text} → ${l.href.split('.com.br').pop()}`);
 
+    // Captura todos os botões/links da página /erp/estoques (lista) e segue cada um
+    await page.goto('https://www.erpvending.com.br/erp/estoques', { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle').catch(() => undefined);
+    const estoqueRowLinks = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('table tbody tr a, table tbody tr button'))
+        .map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? '').trim(),
+          href: (el as HTMLAnchorElement).href ?? '',
+          id: el.id,
+          onclick: (el as HTMLElement).getAttribute('onclick') ?? '',
+          className: (el as HTMLElement).className.slice(0, 60),
+        }));
+    });
+    writeFileSync(`${OUT_DIR}/explore-estoque-row-links.json`, JSON.stringify(estoqueRowLinks, null, 2));
+    console.log('\nLinks por estoque na lista:');
+    for (const l of estoqueRowLinks) console.log(`  ${l.tag} "${l.text}" href=${l.href.split('.com.br').pop() || ''} onclick=${l.onclick.slice(0,80)}`);
+
+    // Segue cada link da row (Produtos Configurados, Acompanhamento, Realizar operação, etc)
+    for (const link of estoqueRowLinks) {
+      if (!link.href || !link.href.includes('erpvending')) continue;
+      const slug = (link.text || 'unknown').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+      console.log(`\n→ ${link.text} (${link.href.split('.com.br').pop()})`);
+      const resp = await page.goto(link.href, { waitUntil: 'domcontentloaded' }).catch((e) => null);
+      if (!resp) continue;
+      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
+      await page.waitForTimeout(800);
+      await page.screenshot({ path: `${OUT_DIR}/estoque-${slug}.png`, fullPage: true });
+      const tables = await page.evaluate(() => Array.from(document.querySelectorAll('table'))
+        .filter((t) => (t as HTMLElement).offsetParent !== null)
+        .map((t) => ({
+          headers: Array.from(t.querySelectorAll('thead th, thead td')).map((c) => (c.textContent ?? '').trim()),
+          rows: Array.from(t.querySelectorAll('tbody tr')).slice(0, 30).map((tr) =>
+            Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').replace(/\s+/g, ' ').trim()),
+          ),
+        })));
+      writeFileSync(`${OUT_DIR}/estoque-${slug}-tables.json`, JSON.stringify(tables, null, 2));
+    }
+
     // 2. Tenta URLs candidatas
     for (const url of CANDIDATE_URLS) {
       const slug = url.split('/').pop();
