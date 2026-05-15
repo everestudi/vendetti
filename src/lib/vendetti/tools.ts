@@ -484,6 +484,144 @@ export const bruno_compare_with_slot = tool({
 });
 
 // ============================================================
+// Rita — Operações: comunicação + escrita no DB (espelha o que o Luís fazia manual)
+// ============================================================
+
+export const rita_log_restock = tool({
+  description:
+    'Registra abastecimento físico que o Weverton fez. Cria registro `Reposicao` no DB e ATUALIZA `Slot.currentQty` somando a quantidade. Use quando o Weverton avisar "abasteci X unidades do produto Y no slot Z" — pode receber via WhatsApp ou Luís encaminhar. Substitui o trabalho manual do Luís de "alimentar o sistema".',
+  inputSchema: z.object({
+    items: z
+      .array(
+        z.object({
+          slotPosition: z.string().describe('Número da seleção, ex: "13"'),
+          qty: z.number().int().min(1),
+          note: z.string().optional(),
+        }),
+      )
+      .min(1),
+    reportedBy: z.string().default('weverton'),
+    sourceNote: z.string().optional().describe('Origem (ex: "Whatsapp", "manual", etc)'),
+  }),
+  execute: async ({ items, reportedBy, sourceNote }) => {
+    const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
+    if (!machine) return { from: 'Rita', error: 'máquina não encontrada' };
+
+    const created: { slot: string; product: string | null; qty: number; newCurrentQty: number }[] = [];
+    const errors: string[] = [];
+
+    const reposicao = await prisma.reposicao.create({
+      data: {
+        reportedBy,
+        source: 'WHATSAPP_AUGUSTO',
+        notes: sourceNote ?? null,
+      },
+    });
+
+    for (const it of items) {
+      const slot = await prisma.slot.findFirst({
+        where: { machineId: machine.id, position: it.slotPosition },
+        include: { sku: true },
+      });
+      if (!slot) {
+        errors.push(`slot ${it.slotPosition} não encontrado`);
+        continue;
+      }
+      if (!slot.skuId) {
+        errors.push(`slot ${it.slotPosition} sem SKU vinculado`);
+        continue;
+      }
+      const newQty = Math.min(slot.currentQty + it.qty, slot.capacity);
+
+      await prisma.reposicaoItem.create({
+        data: {
+          reposicaoId: reposicao.id,
+          skuId: slot.skuId,
+          slotPosition: it.slotPosition,
+          qty: it.qty,
+        },
+      });
+      await prisma.slot.update({
+        where: { id: slot.id },
+        data: { currentQty: newQty },
+      });
+      created.push({
+        slot: it.slotPosition,
+        product: slot.sku?.name ?? null,
+        qty: it.qty,
+        newCurrentQty: newQty,
+      });
+    }
+
+    return {
+      from: 'Rita · Operações',
+      reposicaoId: reposicao.id,
+      registered: created,
+      errors: errors.length > 0 ? errors : undefined,
+      note: 'Slot.currentQty atualizado no DB. Quando Mara fizer sync com Vendtef, vai detectar divergência se Vendtef estiver desatualizado.',
+    };
+  },
+});
+
+export const rita_register_purchase = tool({
+  description:
+    'Registra COMPRA de produtos (entrada de estoque central/Everest). Cria/atualiza SKUs no DB. Use quando Bruno fechar uma compra no Atacadão/Vittal, ou quando Luís encaminhar uma NF-e. Cada item tem produto, qty, custo unitário. Atualiza Sku.cost e marginPct.',
+  inputSchema: z.object({
+    items: z
+      .array(
+        z.object({
+          productName: z.string().min(2),
+          productCode: z.string().optional().describe('Código do fornecedor, ex: GTIN. Se vazio, gera um interno.'),
+          qty: z.number().int().min(1),
+          unitCost: z.number().positive(),
+          supplier: z.enum(['ATACADAO', 'VITTAL', 'OUTRO']).default('OUTRO'),
+        }),
+      )
+      .min(1),
+    invoiceRef: z.string().optional().describe('Nº NF-e ou identificação da compra'),
+    totalAmount: z.number().optional(),
+  }),
+  execute: async ({ items, invoiceRef, totalAmount }) => {
+    const processed: { product: string; action: 'CREATED' | 'UPDATED'; cost: number; qty: number }[] = [];
+
+    for (const it of items) {
+      const code = it.productCode || `RITA-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      const existing = await prisma.sku.findUnique({ where: { code } });
+
+      if (existing) {
+        // Atualiza custo (média ponderada simples por ora)
+        const newCost = Number(existing.cost) === 0 ? it.unitCost : (Number(existing.cost) + it.unitCost) / 2;
+        await prisma.sku.update({
+          where: { code },
+          data: { cost: newCost, supplier: it.supplier },
+        });
+        processed.push({ product: it.productName, action: 'UPDATED', cost: newCost, qty: it.qty });
+      } else {
+        await prisma.sku.create({
+          data: {
+            code,
+            name: it.productName,
+            category: 'a-classificar',
+            supplier: it.supplier,
+            cost: it.unitCost,
+            price: 0,
+          },
+        });
+        processed.push({ product: it.productName, action: 'CREATED', cost: it.unitCost, qty: it.qty });
+      }
+    }
+
+    return {
+      from: 'Rita · Operações',
+      invoiceRef: invoiceRef ?? null,
+      totalAmount: totalAmount ?? items.reduce((s, i) => s + i.unitCost * i.qty, 0),
+      processed,
+      note: 'SKUs atualizados/criados no DB. Pra refletir no Vendtef, usar `/produtos/importarProdutos` (CSV import) — TODO mapear UI.',
+    };
+  },
+});
+
+// ============================================================
 // Rita — Operações (comunicação Weverton + listas)
 // ============================================================
 
@@ -596,6 +734,8 @@ export const VENDETTI_TOOLS = {
   zelda_audit_recent,
   bruno_search_atacadao,
   bruno_compare_with_slot,
+  rita_log_restock,
+  rita_register_purchase,
   rita_propose_restock,
   rita_send_grupo_operacao,
   rita_send_luis,

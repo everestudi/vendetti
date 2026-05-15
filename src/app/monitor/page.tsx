@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
+import { AutoRefresh } from '@/components/AutoRefresh';
 
 export const dynamic = 'force-dynamic';
 
@@ -92,7 +93,7 @@ export default async function MonitorPage() {
 
   return (
     <>
-      <meta httpEquiv="refresh" content="20" />
+      <AutoRefresh intervalMs={20_000} />
       <main className="mx-auto max-w-4xl px-4 py-8">
         <header className="mb-6 flex items-baseline justify-between">
           <div>
