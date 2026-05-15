@@ -14,6 +14,7 @@
     "db:studio": "dotenv -e .env.local -- prisma studio",
     "db:generate": "dotenv -e .env.local -- prisma generate",
     "scrape:login": "dotenv -e .env.local -- tsx src/scrapers/vendtef/login.ts",
+    "scrape:explore": "dotenv -e .env.local -- tsx src/scrapers/vendtef/explore.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "scrape:inventory": "dotenv -e .env.local -- tsx src/scrapers/vendtef/inventory.ts",
     "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts"

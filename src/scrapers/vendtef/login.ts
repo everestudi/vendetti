@@ -1,27 +1,30 @@
 /**
- * Smoke test: loga no ERP Vending (Vendtef) e captura screenshot.
+ * Smoke test: loga no ERP Vending (Vendtef) e captura screenshots.
  *
  * Uso: `npm run scrape:login`
+ *       `HEADLESS=false npm run scrape:login` (pra ver o browser na tela)
  *
- * Pré-requisitos:
- *   - .env.local com ERPVENDING_USER, ERPVENDING_PASS
- *   - npx playwright install chromium
+ * Credenciais lidas do banco via getSecret('ERPVENDING_USER'/'ERPVENDING_PASS').
  */
 
 import { chromium } from 'playwright';
-import 'dotenv/config';
+import { mkdirSync } from 'node:fs';
+import { getSecret } from '../../lib/secrets';
 
 const LOGIN_URL = 'https://www.erpvending.com.br/auth/login/index';
 const HEADLESS = process.env.HEADLESS !== 'false';
 const SCREENSHOT_DIR = './tmp';
 
 async function main() {
-  const user = process.env.ERPVENDING_USER;
-  const pass = process.env.ERPVENDING_PASS;
+  const user = await getSecret('ERPVENDING_USER');
+  const pass = await getSecret('ERPVENDING_PASS');
   if (!user || !pass) {
-    console.error('Faltam ERPVENDING_USER e ERPVENDING_PASS no .env.local');
+    console.error('✗ ERPVENDING_USER / ERPVENDING_PASS não configurados.');
+    console.error('  Abre /settings no app e preenche.');
     process.exit(1);
   }
+
+  mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
   const browser = await chromium.launch({ headless: HEADLESS });
   const ctx = await browser.newContext({
@@ -33,42 +36,51 @@ async function main() {
   try {
     console.log(`→ ${LOGIN_URL}`);
     await page.goto(LOGIN_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle').catch(() => undefined);
 
-    // Os seletores abaixo são *suposições iniciais*. Após o primeiro run real
-    // ajustamos com base no DOM atual capturado em pre-login.png.
-    await page.screenshot({ path: `${SCREENSHOT_DIR}/pre-login.png`, fullPage: true });
-    console.log('  screenshot pre-login.png salvo');
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/01-pre-login.png`, fullPage: true });
+    console.log('  ✓ screenshot 01-pre-login.png');
 
-    // Heurística — tenta múltiplos seletores comuns de form de login
-    const userField = page.locator(
-      'input[name="login"], input[name="usuario"], input[name="username"], input[type="text"]'
-    ).first();
-    const passField = page.locator(
-      'input[name="senha"], input[name="password"], input[type="password"]'
-    ).first();
-    const submitBtn = page.locator(
-      'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar")'
-    ).first();
+    // Heurística pra encontrar campos
+    const userField = page
+      .locator(
+        'input[name="login"], input[name="usuario"], input[name="username"], input[name="user"], input[type="text"]:visible',
+      )
+      .first();
+    const passField = page.locator('input[type="password"]:visible').first();
+    const submitBtn = page
+      .locator(
+        'button[type="submit"], input[type="submit"], button:has-text("Entrar"), button:has-text("Acessar"), button:has-text("Login")',
+      )
+      .first();
 
     await userField.fill(user);
     await passField.fill(pass);
-    await Promise.all([page.waitForLoadState('networkidle'), submitBtn.click()]);
 
-    await page.screenshot({ path: `${SCREENSHOT_DIR}/post-login.png`, fullPage: true });
-    console.log('  screenshot post-login.png salvo');
+    await Promise.all([
+      page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined),
+      submitBtn.click(),
+    ]);
 
-    const isStillOnLogin = page.url().includes('/auth/login');
-    if (isStillOnLogin) {
-      console.error('✗ ainda na tela de login — credenciais ou seletores podem estar errados.');
+    await page.waitForTimeout(2_000); // dá um respiro pra qualquer redirect ou JS
+    await page.screenshot({ path: `${SCREENSHOT_DIR}/02-post-login.png`, fullPage: true });
+    console.log('  ✓ screenshot 02-post-login.png');
+
+    const stillOnLogin = page.url().includes('/auth/login');
+    if (stillOnLogin) {
+      console.error(`✗ ainda na URL de login: ${page.url()}`);
+      console.error('  Veja 02-post-login.png — talvez seletores estejam errados ou credenciais inválidas.');
       process.exit(2);
     }
 
-    console.log(`✓ login OK — URL atual: ${page.url()}`);
-    console.log('  cookies:', (await ctx.cookies()).length);
+    console.log(`✓ login OK — URL: ${page.url()}`);
+    console.log(`  cookies: ${(await ctx.cookies()).length}`);
 
-    // Guarda storage state para reaproveitar (skip login em runs subsequentes)
     await ctx.storageState({ path: `${SCREENSHOT_DIR}/vendtef-session.json` });
-    console.log('  session salva em tmp/vendtef-session.json');
+    console.log(`  ✓ session salva em ${SCREENSHOT_DIR}/vendtef-session.json`);
+
+    // Tira screenshot da home e captura URL + título pra depois
+    console.log(`  title: ${await page.title()}`);
   } finally {
     await ctx.close();
     await browser.close();
