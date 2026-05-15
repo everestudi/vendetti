@@ -28,6 +28,7 @@ export function Header() {
         </Link>
         <nav className="flex items-center gap-6">
           <NavLink href="/" label="Home" />
+          <NavLink href="/equipe" label="Equipe" />
           <NavLink href="/settings" label="Settings" />
           <form action={logout}>
             <button type="submit" className="text-sm text-navy/60 transition-colors hover:text-navy">

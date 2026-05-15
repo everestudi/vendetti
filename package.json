@@ -18,6 +18,7 @@
     "scrape:crawl": "dotenv -e .env.local -- tsx src/scrapers/vendtef/crawl.ts",
     "scrape:inventory": "dotenv -e .env.local -- tsx src/scrapers/vendtef/inventory.ts",
     "scrape:selecoes": "dotenv -e .env.local -- tsx src/scrapers/vendtef/selecoes.ts",
+    "slot:update": "dotenv -e .env.local -- tsx src/scrapers/vendtef/update-slot.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts"
   },
