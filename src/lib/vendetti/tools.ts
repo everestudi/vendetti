@@ -9,7 +9,8 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import { prisma } from '../db';
-import { getMarginBuckets, getLatestSnapshot, getSlotCount, getSkuCount } from './mara/analytics';
+import { getCancellationStats, getMarginBuckets, getLatestSnapshot, getSkuCount, getSlotCount } from './mara/analytics';
+import { evalPriceChange } from './policies';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -166,10 +167,133 @@ export const decision_create = tool({
 // Registry
 // ============================================================
 
+// ============================================================
+// Read-only — Cancelamentos
+// ============================================================
+
+export const mara_cancellations = tool({
+  description:
+    'Sumário de cancelamentos (transações com status=FAILED) nos últimos N dias. Retorna total, breakdown por categoria (USER_CANCEL, CARD_DENIED, OP_CANCELLED, NO_SELECTION, CONNECTION_LOST, OTHER), top 5 produtos com mais cancelamentos, e contagem dos últimos 7 dias. Use pra identificar problemas de UX ou pagamento.',
+  inputSchema: z.object({
+    daysWindow: z.number().int().min(1).max(180).default(30),
+  }),
+  execute: async ({ daysWindow }) => {
+    return getCancellationStats(daysWindow);
+  },
+});
+
+export const transactions_recent = tool({
+  description:
+    'Lista N transações mais recentes (filtra por status OK / FAILED / REFUNDED / COMPLAINT se fornecido). Inclui produto, slot, valor, hora, motivo de falha se houver. Use pra investigar período específico ou ver as últimas vendas.',
+  inputSchema: z.object({
+    limit: z.number().int().min(1).max(100).default(20),
+    status: z.enum(['OK', 'FAILED', 'REFUNDED', 'COMPLAINT']).optional(),
+  }),
+  execute: async ({ limit, status }) => {
+    const rows = await prisma.transaction.findMany({
+      where: status ? { status } : undefined,
+      orderBy: { occurredAt: 'desc' },
+      take: limit,
+      include: { sku: true },
+    });
+    return rows.map((r) => ({
+      occurredAt: r.occurredAt.toISOString(),
+      product: r.sku?.name ?? null,
+      slotPosition: r.slotPosition,
+      amount: Number(r.grossAmount),
+      paymentType: r.paymentType,
+      status: r.status,
+      failureReason: r.failureReason,
+      failureCategory: r.failureCategory,
+    }));
+  },
+});
+
+// ============================================================
+// Write — Slot change (cria Decision, NÃO executa scraper inline)
+// ============================================================
+
+export const vendetti_propose_slot_change = tool({
+  description:
+    'Propõe mudança de capacidade ou preço em um slot. Sempre passa pela policy (margem ≥35%). Cria Decision com status PENDING (🟡🔴) ou APPROVED (🟢). NÃO executa o scraper — Rita executa em ação separada (npm run slot:update -- --selecao X --commit OU via worker quando disponível). Pra preço, lembre da regra das 2 pernas (sistema + físico via Weverton no grupo).',
+  inputSchema: z.object({
+    selecao: z.string().describe('Número da seleção, ex: "13"'),
+    capacity: z.number().int().min(1).max(50).optional(),
+    price: z.number().positive().optional(),
+    rationale: z.string().min(10).describe('Por que essa mudança — quantos dias de dados, padrão observado, hipótese'),
+  }),
+  execute: async ({ selecao, capacity, price, rationale }) => {
+    const slot = await prisma.slot.findFirst({ where: { position: selecao }, include: { sku: true } });
+    if (!slot) return { error: `slot ${selecao} não encontrado no banco — rode mara:sync` };
+
+    const currentPrice = slot.price ? Number(slot.price) : 0;
+    const currentMargin = slot.marginEst ? Number(slot.marginEst) : 0;
+    const cost = currentPrice - currentMargin;
+
+    let level: 'GREEN' | 'YELLOW' | 'RED' = 'GREEN';
+    let policyReason = '';
+    let blocked = false;
+    if (price !== undefined) {
+      const policy = evalPriceChange({ currentPrice, newPrice: price, cost });
+      level = policy.level;
+      policyReason = policy.reason;
+      blocked = policy.blocked ?? false;
+    }
+
+    if (blocked) {
+      return { error: `🔴 BLOQUEADO: ${policyReason}` };
+    }
+
+    const summary = [
+      `Slot ${selecao}`,
+      slot.sku?.name ?? '(sem SKU)',
+      capacity !== undefined ? `capacidade → ${capacity}` : null,
+      price !== undefined ? `preço → R$ ${price.toFixed(2)}` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const status: 'APPROVED' | 'PENDING' = level === 'GREEN' ? 'APPROVED' : 'PENDING';
+
+    const decision = await prisma.decision.create({
+      data: {
+        kind: price !== undefined ? 'PRICE_CHANGE' : 'SLOT_REORG',
+        level,
+        summary,
+        rationale,
+        data: {
+          selecao,
+          changes: { capacity: capacity ?? null, price: price ?? null },
+          before: { capacity: slot.capacity, price: currentPrice, marginEst: currentMargin },
+          policyReason,
+        },
+        status,
+      },
+      select: { id: true, status: true, level: true },
+    });
+
+    const next = price !== undefined
+      ? `Próximo passo: (1) Rita roda \`npm run slot:update -- --selecao ${selecao} --price ${price}${capacity !== undefined ? ` --capacity ${capacity}` : ''} --commit\` (sistema). (2) Rita avisa no grupo "Operação TCN" pro Weverton ajustar preço físico. (3) Decision vira AWAITING_PHYSICAL até Weverton confirmar. Só depois EXECUTED.`
+      : `Próximo passo: rodar \`npm run slot:update -- --selecao ${selecao} --capacity ${capacity} --commit\` (Rita executa no Vendtef).`;
+
+    return {
+      decisionId: decision.id,
+      status: decision.status,
+      level: decision.level,
+      summary,
+      policyReason,
+      next,
+    };
+  },
+});
+
 export const VENDETTI_TOOLS = {
   mara_summary,
   mara_margin_buckets,
   mara_slot_detail,
+  mara_cancellations,
+  transactions_recent,
   list_recent_decisions,
   decision_create,
+  vendetti_propose_slot_change,
 } as const;

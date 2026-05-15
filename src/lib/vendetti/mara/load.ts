@@ -16,6 +16,8 @@ export interface LoadResult {
   snapshotId: string;
   dailyRevenueUpserted: number;
   transactionsAggregatedDays: number;
+  transactionsCreated: number;
+  cancellationsCreated: number;
 }
 
 export function brlToNumber(s: string): number {
@@ -218,6 +220,89 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     aggregatedDays++;
   }
 
+  // 7. Transactions INDIVIDUAIS (OK) — pelo Nº lógico do Vendtef como vendpagoId
+  let trxCreated = 0;
+  for (const t of data.transactions) {
+    const [d, m, y] = t.dateBR.split('/').map(Number);
+    const [hh, mm, ss] = t.timeBR.split(':').map(Number);
+    if (!d || !m || !y) continue;
+    const occurredAt = new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0));
+
+    // Match SKU pelo nome (best-effort)
+    let skuId: string | undefined;
+    if (t.product) {
+      const sku = await prisma.sku.findFirst({ where: { name: t.product } });
+      skuId = sku?.id;
+    }
+
+    const vendpagoId = t.nsu || `${t.dateBR}-${t.timeBR}-${t.slot}-${t.product}`;
+    try {
+      await prisma.transaction.upsert({
+        where: { vendpagoId },
+        create: {
+          vendpagoId,
+          occurredAt,
+          skuId,
+          slotPosition: t.slot || null,
+          qty: 1,
+          grossAmount: brlToNumber(t.totalBR),
+          paymentType: t.paymentType,
+          status: 'OK',
+        },
+        update: {},
+      });
+      trxCreated++;
+    } catch {
+      /* duplicado ou erro de constraint — ignora */
+    }
+  }
+
+  // 8. Cancelamentos como Transactions com status=FAILED + failureReason/Category
+  let canceledCreated = 0;
+  function categorize(desc: string): string {
+    const d = desc.toLowerCase();
+    if (d.includes('usuário cancelou') || d.includes('usuario cancelou')) return 'USER_CANCEL';
+    if (d.includes('não autorizada') || d.includes('nao autorizada')) return 'CARD_DENIED';
+    if (d.includes('operacao cancelada') || d.includes('operação cancelada')) return 'OP_CANCELLED';
+    if (d.includes('não foi selecionado') || d.includes('nao foi selecionado')) return 'NO_SELECTION';
+    if (d.includes('conexão com a máquina') || d.includes('conexao com a maquina')) return 'CONNECTION_LOST';
+    return 'OTHER';
+  }
+  for (const c of data.cancellations) {
+    const [d, m, y] = c.dateBR.split('/').map(Number);
+    const [hh, mm, ss] = (c.timeBR || '00:00:00').split(':').map(Number);
+    if (!d || !m || !y) continue;
+    const occurredAt = new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0));
+
+    let skuId: string | undefined;
+    if (c.product && c.product !== 'Indefinido') {
+      const sku = await prisma.sku.findFirst({ where: { name: c.product } });
+      skuId = sku?.id;
+    }
+    const vendpagoId = c.nsu || `cancel-${c.dateBR}-${c.timeBR}-${c.product}`;
+    try {
+      await prisma.transaction.upsert({
+        where: { vendpagoId },
+        create: {
+          vendpagoId,
+          occurredAt,
+          skuId,
+          slotPosition: c.slot || null,
+          qty: 0,
+          grossAmount: brlToNumber(c.totalBR),
+          paymentType: c.paymentType,
+          status: 'FAILED',
+          failureReason: c.description,
+          failureCategory: categorize(c.description),
+        },
+        update: { failureReason: c.description, failureCategory: categorize(c.description) },
+      });
+      canceledCreated++;
+    } catch {
+      /* idem */
+    }
+  }
+
   return {
     machineId: machine.id,
     skusUpserted: skusCount,
@@ -225,5 +310,7 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     snapshotId: snapshot.id,
     dailyRevenueUpserted: dailyCount,
     transactionsAggregatedDays: aggregatedDays,
+    transactionsCreated: trxCreated,
+    cancellationsCreated: canceledCreated,
   };
 }

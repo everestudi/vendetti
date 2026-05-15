@@ -113,22 +113,29 @@ model InventorySnapshot {
 // === Vendas e pagamentos ===
 
 model Transaction {
-  id          String   @id @default(cuid())
-  vendpagoId  String?  @unique // id da transação no Vendpago
-  occurredAt  DateTime
-  skuId       String?
-  sku         Sku?     @relation(fields: [skuId], references: [id])
-  slotPosition String?
-  qty         Int      @default(1)
-  grossAmount Decimal  @db.Decimal(10, 2)
-  netAmount   Decimal? @db.Decimal(10, 2)
-  paymentType String?  // pix, credito, debito, aproximacao
-  status      TransactionStatus @default(OK)
-  rawJson     Json?
-  createdAt   DateTime @default(now())
+  id              String   @id @default(cuid())
+  /// Nº lógico do Vendtef (idx 13 do CSV) — UUID-like, único.
+  vendpagoId      String?  @unique
+  occurredAt      DateTime
+  skuId           String?
+  sku             Sku?     @relation(fields: [skuId], references: [id])
+  slotPosition    String?
+  qty             Int      @default(1)
+  grossAmount     Decimal  @db.Decimal(10, 2)
+  netAmount       Decimal? @db.Decimal(10, 2)
+  /// "TEF", "PIX", "CASH", "PRIVATE LABEL" — copiado direto do Vendtef.
+  paymentType     String?
+  status          TransactionStatus @default(OK)
+  /// Quando status = FAILED, motivo do cancelamento (ex: "PagBank: NAO AUTORIZADA").
+  failureReason   String?  @db.Text
+  /// Categoria normalizada: USER_CANCEL | CARD_DENIED | OP_CANCELLED | NO_SELECTION | OTHER
+  failureCategory String?
+  rawJson         Json?
+  createdAt       DateTime @default(now())
 
   @@index([occurredAt])
   @@index([skuId, occurredAt])
+  @@index([status, occurredAt])
 }
 
 enum TransactionStatus {

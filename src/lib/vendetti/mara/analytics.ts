@@ -83,6 +83,49 @@ export async function getSkuCount(): Promise<number> {
   return prisma.sku.count();
 }
 
+export interface CancellationStats {
+  total: number;
+  byCategory: { category: string; count: number }[];
+  topProducts: { product: string; count: number }[];
+  last7DaysCount: number;
+}
+
+export async function getCancellationStats(daysWindow = 30): Promise<CancellationStats> {
+  const since = new Date();
+  since.setDate(since.getDate() - daysWindow);
+
+  const all = await prisma.transaction.findMany({
+    where: { status: 'FAILED', occurredAt: { gte: since } },
+    include: { sku: true },
+  });
+
+  const byCat = new Map<string, number>();
+  const byProd = new Map<string, number>();
+  let last7 = 0;
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  for (const t of all) {
+    const cat = t.failureCategory ?? 'OTHER';
+    byCat.set(cat, (byCat.get(cat) ?? 0) + 1);
+    const prod = t.sku?.name ?? '(indefinido)';
+    byProd.set(prod, (byProd.get(prod) ?? 0) + 1);
+    if (t.occurredAt >= sevenDaysAgo) last7++;
+  }
+
+  return {
+    total: all.length,
+    byCategory: Array.from(byCat.entries())
+      .map(([category, count]) => ({ category, count }))
+      .sort((a, b) => b.count - a.count),
+    topProducts: Array.from(byProd.entries())
+      .map(([product, count]) => ({ product, count }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5),
+    last7DaysCount: last7,
+  };
+}
+
 export interface DailyPoint {
   day: number;
   thisMonth: number | null;

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getLatestSnapshot, getMarginBuckets, getSlotCount, getSkuCount, getMonthlyRevenueComparison, type SlotAnalytics } from '@/lib/vendetti/mara/analytics';
+import { getLatestSnapshot, getMarginBuckets, getSlotCount, getSkuCount, getMonthlyRevenueComparison, getCancellationStats, type SlotAnalytics } from '@/lib/vendetti/mara/analytics';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { getProductMeta } from '@/lib/products/icons';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
@@ -11,13 +11,14 @@ const mara = TEAM.find((a) => a.id === 'mara')!;
 
 export default async function MaraDashboard({ searchParams }: { searchParams: Promise<{ slot?: string }> }) {
   const { slot: focusSlot } = await searchParams;
-  const [snap, buckets, slotCount, skuCount, slots, revenue] = await Promise.all([
+  const [snap, buckets, slotCount, skuCount, slots, revenue, cancellations] = await Promise.all([
     getLatestSnapshot(),
     getMarginBuckets(),
     getSlotCount(),
     getSkuCount(),
     getSlotsWithMargin(),
     getMonthlyRevenueComparison(),
+    getCancellationStats(30),
   ]);
 
   const focus = focusSlot ? slots.find((s) => s.selecao === focusSlot) : null;
@@ -79,6 +80,44 @@ export default async function MaraDashboard({ searchParams }: { searchParams: Pr
             )}
           </header>
           <RevenueChart points={revenue.points} labels={revenue.monthLabels} />
+        </section>
+      )}
+
+      {/* Cancelamentos */}
+      {cancellations.total > 0 && (
+        <section className="mt-8 rounded-lg border border-rose-200 bg-rose-50/40 p-5">
+          <header className="mb-3 flex items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-rose-900">Cancelamentos · últimos 30 dias</h2>
+              <p className="text-xs text-rose-800/70">
+                {cancellations.total} no total · <strong>{cancellations.last7DaysCount}</strong> nos últimos 7 dias
+              </p>
+            </div>
+          </header>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900/70">Por categoria</div>
+              <ul className="space-y-1 text-sm">
+                {cancellations.byCategory.map((c) => (
+                  <li key={c.category} className="flex items-baseline justify-between gap-2 border-b border-rose-200/50 pb-1">
+                    <span className="font-mono text-xs">{c.category.replace(/_/g, ' ')}</span>
+                    <span className="font-bold text-rose-900">{c.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div>
+              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-rose-900/70">Top 5 produtos com falha</div>
+              <ul className="space-y-1 text-sm">
+                {cancellations.topProducts.map((p) => (
+                  <li key={p.product} className="flex items-baseline justify-between gap-2 border-b border-rose-200/50 pb-1">
+                    <span className="truncate">{p.product}</span>
+                    <span className="shrink-0 font-bold text-rose-900">{p.count}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
         </section>
       )}
 
