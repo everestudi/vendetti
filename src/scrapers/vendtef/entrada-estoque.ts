@@ -141,47 +141,47 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
     await page.screenshot({ path: `${OUT_DIR}/01-operacoes-form.png`, fullPage: true });
     await dumpFormFields(page, '01-operacoes');
 
-    // Seleciona estoque "Estoque Everest" se necessário (campo geralmente já vem preenchido pelo header)
-    const estoqueSelect = page.locator('select').first();
-    const estoqueCount = await estoqueSelect.count();
-    if (estoqueCount > 0) {
-      const opts = await estoqueSelect.locator('option').allTextContents();
-      const everestIdx = opts.findIndex((o) => /everest/i.test(o));
-      if (everestIdx > 0) {
-        await estoqueSelect.selectOption({ index: everestIdx });
+    // Estoque: select#estoque — escolhe "Estoque Everest"
+    const estoqueSelect = page.locator('#estoque');
+    if (await estoqueSelect.count() === 0) throw new Error('select #estoque não encontrado');
+    const estoqueOpts = await estoqueSelect.locator('option').allTextContents();
+    const everestIdx = estoqueOpts.findIndex((o) => /everest/i.test(o));
+    if (everestIdx < 0) throw new Error('"Estoque Everest" não está na lista');
+    await estoqueSelect.selectOption({ index: everestIdx });
+    await page.waitForTimeout(500);
+
+    // Tipo: select#tipoOperacao — escolhe "Entrada de Estoque"
+    const tipoSelect = page.locator('#tipoOperacao');
+    if (await tipoSelect.count() === 0) throw new Error('select #tipoOperacao não encontrado');
+    await tipoSelect.selectOption({ label: 'Entrada de Estoque' });
+
+    // User: "tem que selecionar e esperar um pouco" — o form expande via JS após both selects
+    await page.waitForTimeout(2_000);
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.screenshot({ path: `${OUT_DIR}/02-after-tipo.png`, fullPage: true });
+    await dumpFormFields(page, '02-after-tipo');
+
+    // Se ainda não expandiu, tenta clicar Salvar pra ir pra próxima tela
+    const itemFields = await page.locator('input[name*="produto"], input[id*="produto"], .autocomplete, [class*="produto"]').count();
+    if (itemFields === 0) {
+      const salvar = page.locator('button:has-text("Salvar"), input[value="Salvar"]').first();
+      if (await salvar.count() > 0) {
+        await salvar.click();
+        await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
+        await page.waitForTimeout(1_500);
+        await page.screenshot({ path: `${OUT_DIR}/03-after-salvar.png`, fullPage: true });
+        await dumpFormFields(page, '03-after-salvar');
       }
     }
 
-    // Seleciona "Entrada de Estoque" no dropdown de tipo
-    // (segundo screenshot do user — é o segundo select)
-    const tipoSelect = page.locator('select').nth(1);
-    if (await tipoSelect.count() > 0) {
-      await tipoSelect.selectOption({ label: 'Entrada de Estoque' });
-      await page.waitForTimeout(800);
-      await page.screenshot({ path: `${OUT_DIR}/02-tipo-selected.png`, fullPage: true });
-      await dumpFormFields(page, '02-after-tipo');
-    } else {
-      throw new Error('Dropdown "Tipo de Operação" não encontrado');
-    }
-
-    // === Próximos passos descobertos no runtime ===
-    // O form provavelmente abre uma área pra adicionar itens com:
-    //   - produto (autocomplete)
-    //   - quantidade
-    //   - custo unitário
-    // Selectors exatos descobertos via dump em 02-after-tipo-fields.json
-    //
-    // TODO: implementar add items + salvar após confirmar selectors
-
-    // Por enquanto, só registra a tentativa e marca como erro pra iterar
-    console.log(`  ⚠️ Purchase ${purchase.id}: form aberto, items ainda não adicionados (selectors mapping pendente)`);
+    console.log(`  ⚠️ Purchase ${purchase.id}: form mapeado até segundo nível, items ainda não adicionados`);
     console.log(`  ${purchase.items.length} items pra adicionar:`);
     for (const it of purchase.items) {
       console.log(
         `    - ${it.code} | ${it.productName.slice(0, 40)} | ${it.qty}× R$${it.unitCost.toFixed(2)}${it.needsCadastro ? ' [PRECISA CADASTRAR]' : ''}`,
       );
     }
-    return { ok: false, error: 'selectors-pending' };
+    return { ok: false, error: 'selectors-pending-stage2' };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await page.screenshot({ path: `${OUT_DIR}/error.png`, fullPage: true }).catch(() => undefined);
