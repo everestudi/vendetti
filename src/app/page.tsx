@@ -3,6 +3,7 @@ import { getLatestSnapshot, getSlotCount, getSkuCount } from '@/lib/vendetti/mar
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { SprintProgress } from '@/components/SprintProgress';
+import { IdeasBox } from '@/components/IdeasBox';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
 
 export const dynamic = 'force-dynamic';
@@ -108,10 +109,13 @@ export default async function Home() {
       <section className="mt-14">
         <header className="mb-4">
           <h2 className="text-2xl font-bold text-navy">Evolução do projeto</h2>
-          <p className="text-sm text-navy/60">6 sprints — Foundation → Time completo</p>
+          <p className="text-sm text-navy/60">7 sprints — Foundation → Ideias futuras</p>
         </header>
         <SprintProgress />
       </section>
+
+      {/* IDEIAS */}
+      <IdeasBox />
 
       {/* INSPIRAÇÃO */}
       <section className="mt-14 rounded-lg border border-gold/30 bg-gold-50 p-6">

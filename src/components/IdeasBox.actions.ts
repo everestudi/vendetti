@@ -7,7 +7,7 @@ export async function addIdea(formData: FormData) {
   const content = String(formData.get('content') ?? '').trim();
   if (!content) return;
   await prisma.idea.create({ data: { content } });
-  revalidatePath('/ideias');
+  revalidatePath('/');
 }
 
 export async function resolveIdea(formData: FormData) {
@@ -18,7 +18,7 @@ export async function resolveIdea(formData: FormData) {
     where: { id },
     data: { status: 'RESOLVED', resolvedAt: new Date(), note },
   });
-  revalidatePath('/ideias');
+  revalidatePath('/');
 }
 
 export async function reopenIdea(id: string) {
@@ -26,10 +26,10 @@ export async function reopenIdea(id: string) {
     where: { id },
     data: { status: 'NEW', resolvedAt: null },
   });
-  revalidatePath('/ideias');
+  revalidatePath('/');
 }
 
 export async function deleteIdea(id: string) {
   await prisma.idea.delete({ where: { id } });
-  revalidatePath('/ideias');
+  revalidatePath('/');
 }

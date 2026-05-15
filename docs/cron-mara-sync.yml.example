@@ -1,0 +1,30 @@
+name: Mara · daily sync
+
+# Roda todo dia às 07:00 BRT (10:00 UTC) — após o pico matinal
+on:
+  schedule:
+    - cron: '0 10 * * *'
+  workflow_dispatch: # permite trigger manual
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Trigger Mara sync endpoint
+        env:
+          ENDPOINT: ${{ secrets.MARA_SYNC_ENDPOINT }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          echo "→ POST $ENDPOINT"
+          response=$(curl -sS -w "\nHTTP_STATUS:%{http_code}\nTIME:%{time_total}s\n" \
+            -X POST "$ENDPOINT" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            --max-time 300)
+          echo "$response"
+          status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+          if [ "$status" != "200" ]; then
+            echo "::error::sync falhou (HTTP $status)"
+            exit 1
+          fi
