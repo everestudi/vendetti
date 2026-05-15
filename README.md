@@ -70,6 +70,15 @@ npm run db:push
 npm run dev
 ```
 
+### Após mudanças no schema do Prisma
+
+```bash
+npm run db:push          # aplica schema
+npm run db:generate      # regenera client
+# RESTART obrigatório do dev server (Turbopack cacheia o client em memória):
+# Ctrl+C → rm -rf .next → npm run dev
+```
+
 ## Scripts
 
 | Comando | O que faz |
