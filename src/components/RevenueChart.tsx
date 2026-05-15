@@ -30,7 +30,7 @@ export function RevenueChart({ points, labels }: Props) {
           <Tooltip
             contentStyle={{ background: 'white', border: '1px solid #1F386420', borderRadius: 8, fontSize: 12 }}
             labelFormatter={(d) => `Dia ${d}`}
-            formatter={(value: number | null, name) => [value !== null ? brl(value) : '—', name]}
+            formatter={(value, name) => [typeof value === 'number' ? brl(value) : '—', name]}
           />
           <Legend wrapperStyle={{ fontSize: 12, paddingTop: 8 }} />
           <Line

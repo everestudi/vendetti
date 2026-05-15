@@ -81,7 +81,7 @@ async function snapshot(page: Page, tabName: string): Promise<TabSnapshot> {
       .map((a) => ({ text: text(a), href: a.href }))
       .filter((l) => l.text.length > 0 && l.text.length < 100);
 
-    const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>('button, input[type="submit"]'))
+    const buttons = Array.from(document.querySelectorAll('button, input[type="submit"]'))
       .filter((b) => (b as HTMLElement).offsetParent !== null)
       .map((b) => text(b) || (b as HTMLInputElement).value || '')
       .filter((t) => t && t.length < 60);

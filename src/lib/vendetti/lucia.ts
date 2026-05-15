@@ -45,8 +45,10 @@ export interface ProcessResult {
   emailEscalated?: boolean;
 }
 
-function appendConversation(prev: unknown, entry: { from: string; at: string; text?: string; imageUrl?: string }) {
-  const arr = Array.isArray(prev) ? (prev as unknown[]) : [];
+type ConversationEntry = { from: string; at: string; text?: string; imageUrl?: string };
+
+function appendConversation(prev: unknown, entry: ConversationEntry): ConversationEntry[] {
+  const arr = Array.isArray(prev) ? (prev as ConversationEntry[]) : [];
   return [...arr, entry];
 }
 
@@ -83,7 +85,7 @@ export async function processLuciaInbound(p: InboundPayload): Promise<ProcessRes
         source: 'zapi',
         customerNote: text.slice(0, 1000),
         status: 'AWAITING_PROOF',
-        conversation: appendConversation(null, { from: 'customer', at: new Date().toISOString(), text }),
+        conversation: appendConversation(null, { from: 'customer', at: new Date().toISOString(), text }) as unknown as object,
       },
     });
     await sendText(p.phone, TEMPLATES.greet);
@@ -148,11 +150,11 @@ export async function processLuciaInbound(p: InboundPayload): Promise<ProcessRes
   return { classified: klass.tier, silenced: true };
 }
 
-async function updateConversation(id: string, entry: { from: string; at: string; text?: string; imageUrl?: string }) {
+async function updateConversation(id: string, entry: ConversationEntry) {
   const c = await prisma.complaint.findUnique({ where: { id } });
   if (!c) return;
   const conv = appendConversation(c.conversation, entry);
-  await prisma.complaint.update({ where: { id }, data: { conversation: conv } });
+  await prisma.complaint.update({ where: { id }, data: { conversation: conv as unknown as object } });
 }
 
 async function getSlotInfo(position: string): Promise<string | null> {
