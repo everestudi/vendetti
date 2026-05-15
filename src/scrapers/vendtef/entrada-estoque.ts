@@ -211,12 +211,14 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCo
       await page.locator('input#pesquisa, input[name="pesquisa"]').first().click();
       await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
       await page.waitForTimeout(800);
-      // Se aparecer qualquer linha cujo nome contém todos os tokens, pular
-      const rows = await page.evaluate(() => {
-        return Array.from(document.querySelectorAll('table tbody tr'))
-          .map((tr) => (tr.textContent ?? '').toLowerCase().replace(/\s+/g, ' '));
+      // Compara só com a coluna do NOME (2ª col na tabela de produtos)
+      const productNames = await page.evaluate(() => {
+        return Array.from(document.querySelectorAll('table tbody tr')).map((tr) => {
+          const cells = tr.querySelectorAll('td');
+          return (cells[1]?.textContent ?? '').toLowerCase().replace(/\s+/g, ' ').trim();
+        });
       });
-      const exists = rows.some((r) => tokens.every((t) => r.includes(t)));
+      const exists = productNames.some((n) => tokens.every((t) => n.includes(t)));
       if (exists) {
         return { ok: true, error: 'já cadastrado' };
       }
@@ -242,11 +244,12 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCo
     }
     await nomeField.fill(productName);
 
-    // Custo: #preco (Vendtef nomeou assim — "preco" é CUSTO, "valor_venda" é PREÇO DE VENDA)
+    // Custo: #preco (Vendtef nomeou assim — "preco" é CUSTO do produto)
     await page.locator('#preco').fill(unitCost.toFixed(2).replace('.', ','));
 
-    // Valor de venda (preço final) — deixa 0 pra Luís ajustar depois
-    await page.locator('#valor_venda').fill('0,00').catch(() => undefined);
+    // NÃO preencher #valor_venda — esse campo é da seção "Dados Fiscais (Opcional)"
+    // que exige TODOS os 5 campos (CFOP, NCM, cProd, xProd, valor_venda) preenchidos
+    // ou TODOS vazios. Como não temos esses dados fiscais, deixa vazio.
 
     // Categoria: escolhe primeira opção real (Bebidas Frias, p.ex.)
     const catOpts = await page.locator('#categoria option').allInnerTexts();
@@ -264,8 +267,8 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCo
     await page.waitForTimeout(2_000);
     await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-04-saved.png`, fullPage: true });
 
-    // Sucesso: campo #valor_venda não está mais visível (= saiu do form, voltou pra lista)
-    const stillInForm = await page.locator('#valor_venda:visible').count() > 0;
+    // Sucesso: botão #save sumiu (saiu do form). #addProd visível = voltou pra lista.
+    const stillInForm = await page.locator('input#save:visible').count() > 0;
     const errAlert = await page.locator('.alert-danger:visible, .toast-error:visible').first().textContent({ timeout: 500 }).catch(() => null);
     if (errAlert && errAlert.trim()) {
       return { ok: false, error: `Vendtef erro: ${errAlert.slice(0, 200)}` };
