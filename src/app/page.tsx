@@ -23,12 +23,42 @@ export default async function Home() {
           inspirado no Project Vend · Anthropic
         </div>
         <h1 className="text-4xl font-bold leading-tight text-navy lg:text-5xl">
-          Vendetti — CEO autônomo da minha vending machine
+          Vendetti O CEO da minha vending machine
         </h1>
         <p className="mt-3 max-w-3xl text-lg text-navy/70">
-          Um time de 6 agentes (Claude Opus 4.7) operando a TCN Pro 6G no Blue Mall Rondon: análise de
-          dados, compras, atendimento, operações de campo, oversight e orquestração.
+          Um time de 6 agentes (Claude Opus 4.7) operando uma Vending Machine (FLEX COMBO 6G) no Blue
+          Mall Rondon: análise de dados, compras, atendimento, operações de campo, oversight e
+          orquestração.
         </p>
+        <div className="mt-5 max-w-3xl space-y-3 text-sm leading-relaxed text-navy/65">
+          <p>
+            O caminho até aqui mistura várias técnicas. O sistema do fornecedor da máquina
+            (Vendpago/Vendtef) não tem API pública — então a <strong className="text-navy/80">Mara</strong> e a{' '}
+            <strong className="text-navy/80">Rita</strong> usam <strong className="text-navy/80">Playwright</strong>{' '}
+            (browser headless) pra logar no ERP, baixar relatórios de vendas/cancelamentos em CSV,
+            preencher tabelas e dar entrada de estoque na pele de um humano.
+          </p>
+          <p>
+            O <strong className="text-navy/80">Bruno</strong> lê NF-e em foto ou PDF usando o vision
+            do Claude Opus 4.7: extrai fornecedor, itens, qty e custo, faz fuzzy match com os SKUs
+            já cadastrados, rateia desconto Assaí proporcionalmente e grava no banco. Depois, um{' '}
+            <strong className="text-navy/80">GitHub Action</strong> disparado pelo Vercel sobe um runner
+            com Playwright pra sincronizar a entrada no Vendtef — cadastrando produto novo se preciso —
+            sem depender do meu Mac estar ligado.
+          </p>
+          <p>
+            A <strong className="text-navy/80">Lúcia</strong> roda uma state machine de SAC ligada
+            ao WhatsApp via <strong className="text-navy/80">Z-API</strong>: cliente reclama, ela pede o
+            print, pede o número do slot, e escala pra mim com tudo organizado. Outbound também sai por
+            ali — alertas pro grupo &ldquo;Operação TCN Vending Machine&rdquo; e mensagens pro Weverton, o
+            zelador que abastece a máquina fisicamente.
+          </p>
+          <p>
+            Segurança: secrets cifrados <strong className="text-navy/80">AES-256-GCM</strong> no Postgres
+            (Neon), session cookies <strong className="text-navy/80">HMAC-SHA256</strong> via Web Crypto API.
+            Tudo open-source em <a href="https://github.com/everestudi/vendetti" className="text-navy underline hover:text-gold">github.com/everestudi/vendetti</a>.
+          </p>
+        </div>
       </section>
 
       {/* TIME */}
