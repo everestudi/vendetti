@@ -82,3 +82,76 @@ export async function getSlotCount(): Promise<number> {
 export async function getSkuCount(): Promise<number> {
   return prisma.sku.count();
 }
+
+export interface DailyPoint {
+  day: number;
+  thisMonth: number | null;
+  lastMonth: number | null;
+}
+
+/**
+ * Pega faturamento por dia do mês atual e do mês anterior, com dias do mês como eixo X.
+ * Retorna array com 31 pontos (dia 1 a 31) — null nos dias sem dado.
+ */
+export async function getMonthlyRevenueComparison(now: Date = new Date()): Promise<{
+  points: DailyPoint[];
+  totals: { thisMonth: number; lastMonth: number; thisMonthDays: number; lastMonthDays: number };
+  monthLabels: { thisMonth: string; lastMonth: string };
+}> {
+  const id = await getMachineId();
+  if (!id) {
+    return {
+      points: [],
+      totals: { thisMonth: 0, lastMonth: 0, thisMonthDays: 0, lastMonthDays: 0 },
+      monthLabels: { thisMonth: '', lastMonth: '' },
+    };
+  }
+
+  const thisMonth = { y: now.getFullYear(), m: now.getMonth() }; // 0-indexed
+  const lastMonthDate = new Date(thisMonth.y, thisMonth.m - 1, 1);
+  const lastMonth = { y: lastMonthDate.getFullYear(), m: lastMonthDate.getMonth() };
+
+  const startThis = new Date(Date.UTC(thisMonth.y, thisMonth.m, 1));
+  const endThis = new Date(Date.UTC(thisMonth.y, thisMonth.m + 1, 0));
+  const startLast = new Date(Date.UTC(lastMonth.y, lastMonth.m, 1));
+  const endLast = new Date(Date.UTC(lastMonth.y, lastMonth.m + 1, 0));
+
+  const [thisRows, lastRows] = await Promise.all([
+    prisma.dailyRevenue.findMany({
+      where: { machineId: id, date: { gte: startThis, lte: endThis } },
+      orderBy: { date: 'asc' },
+    }),
+    prisma.dailyRevenue.findMany({
+      where: { machineId: id, date: { gte: startLast, lte: endLast } },
+      orderBy: { date: 'asc' },
+    }),
+  ]);
+
+  const thisMap = new Map(thisRows.map((r) => [r.date.getUTCDate(), Number(r.totalRevenue)]));
+  const lastMap = new Map(lastRows.map((r) => [r.date.getUTCDate(), Number(r.totalRevenue)]));
+
+  const points: DailyPoint[] = [];
+  for (let d = 1; d <= 31; d++) {
+    points.push({
+      day: d,
+      thisMonth: thisMap.get(d) ?? null,
+      lastMonth: lastMap.get(d) ?? null,
+    });
+  }
+
+  const monthLabels = {
+    thisMonth: new Date(thisMonth.y, thisMonth.m, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' }),
+    lastMonth: new Date(lastMonth.y, lastMonth.m, 1).toLocaleString('pt-BR', { month: 'long', year: 'numeric' }),
+  };
+
+  return {
+    points,
+    totals: {
+      thisMonth: thisRows.reduce((acc, r) => acc + Number(r.totalRevenue), 0),
+      lastMonth: lastRows.reduce((acc, r) => acc + Number(r.totalRevenue), 0),
+      thisMonthDays: thisRows.length,
+      lastMonthDays: lastRows.length,
+    },
+    monthLabels,
+  };
+}

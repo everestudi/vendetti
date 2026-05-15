@@ -38,14 +38,15 @@ enum Supplier {
 // === Máquina física ===
 
 model Machine {
-  id           String              @id @default(cuid())
-  name         String              @unique
-  model        String
-  location     String
-  active       Boolean             @default(true)
-  slots        Slot[]
-  snapshots    InventorySnapshot[]
-  createdAt    DateTime            @default(now())
+  id            String              @id @default(cuid())
+  name          String              @unique
+  model         String
+  location      String
+  active        Boolean             @default(true)
+  slots         Slot[]
+  snapshots     InventorySnapshot[]
+  dailyRevenue  DailyRevenue[]
+  createdAt     DateTime            @default(now())
 }
 
 model Slot {
@@ -67,6 +68,30 @@ model Slot {
   updatedAt       DateTime @updatedAt
 
   @@unique([machineId, position])
+}
+
+/// Faturamento por dia, da tabela `Faturamento Diário` do Vendtef.
+model DailyRevenue {
+  id           String   @id @default(cuid())
+  machineId    String
+  machine      Machine  @relation(fields: [machineId], references: [id])
+  date         DateTime @db.Date
+  qtdTotal     Int
+  qtdTef       Int      @default(0)
+  qtdPix       Int      @default(0)
+  qtdCash      Int      @default(0)
+  qtdPrivate   Int      @default(0)
+  totalTef     Decimal  @default(0) @db.Decimal(10, 2)
+  totalPix     Decimal  @default(0) @db.Decimal(10, 2)
+  totalCash    Decimal  @default(0) @db.Decimal(10, 2)
+  totalPrivate Decimal  @default(0) @db.Decimal(10, 2)
+  totalRevenue Decimal  @default(0) @db.Decimal(10, 2)
+  totalCost    Decimal  @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([machineId, date])
+  @@index([date])
 }
 
 /// Snapshot diário do estado de inventário da máquina.

@@ -18,7 +18,7 @@ async function main() {
 
   console.log('\n[2/3] load — UPSERT no Postgres...');
   const r = await loadAll(data);
-  console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · snapshot ${r.snapshotId.slice(0, 12)}…`);
+  console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · ${r.dailyRevenueUpserted} dias de faturamento · snapshot ${r.snapshotId.slice(0, 12)}…`);
 
   console.log('\n[3/3] analytics — sumário do estado atual...');
   const snap = await getLatestSnapshot();

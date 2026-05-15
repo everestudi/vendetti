@@ -14,6 +14,7 @@ export interface LoadResult {
   skusUpserted: number;
   slotsUpserted: number;
   snapshotId: string;
+  dailyRevenueUpserted: number;
 }
 
 export function brlToNumber(s: string): number {
@@ -95,5 +96,45 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     },
   });
 
-  return { machineId: machine.id, skusUpserted: skusCount, slotsUpserted: slotsCount, snapshotId: snapshot.id };
+  // 5. DailyRevenue (UPSERT por data — re-sync atualiza valores)
+  let dailyCount = 0;
+  for (const r of data.dailyRevenue) {
+    const [d, m, y] = r.dateBR.split('/').map(Number);
+    if (!d || !m || !y) continue;
+    const date = new Date(Date.UTC(y, m - 1, d));
+    await prisma.dailyRevenue.upsert({
+      where: { machineId_date: { machineId: machine.id, date } },
+      create: {
+        machineId: machine.id,
+        date,
+        qtdTotal: r.qtdTotal,
+        qtdTef: r.qtdTef,
+        qtdPix: r.qtdPix,
+        qtdCash: r.qtdCash,
+        qtdPrivate: r.qtdPrivate,
+        totalTef: brlToNumber(r.totalTefBR),
+        totalPix: brlToNumber(r.totalPixBR),
+        totalCash: brlToNumber(r.totalCashBR),
+        totalPrivate: brlToNumber(r.totalPrivateBR),
+        totalRevenue: brlToNumber(r.totalBR),
+        totalCost: brlToNumber(r.costBR),
+      },
+      update: {
+        qtdTotal: r.qtdTotal,
+        qtdTef: r.qtdTef,
+        qtdPix: r.qtdPix,
+        qtdCash: r.qtdCash,
+        qtdPrivate: r.qtdPrivate,
+        totalTef: brlToNumber(r.totalTefBR),
+        totalPix: brlToNumber(r.totalPixBR),
+        totalCash: brlToNumber(r.totalCashBR),
+        totalPrivate: brlToNumber(r.totalPrivateBR),
+        totalRevenue: brlToNumber(r.totalBR),
+        totalCost: brlToNumber(r.costBR),
+      },
+    });
+    dailyCount++;
+  }
+
+  return { machineId: machine.id, skusUpserted: skusCount, slotsUpserted: slotsCount, snapshotId: snapshot.id, dailyRevenueUpserted: dailyCount };
 }

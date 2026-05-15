@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { getLatestSnapshot, getMarginBuckets, getSlotCount, getSkuCount, type SlotAnalytics } from '@/lib/vendetti/mara/analytics';
+import { getLatestSnapshot, getMarginBuckets, getSlotCount, getSkuCount, getMonthlyRevenueComparison, type SlotAnalytics } from '@/lib/vendetti/mara/analytics';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { getProductMeta } from '@/lib/products/icons';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
+import { RevenueChart } from '@/components/RevenueChart';
 
 export const dynamic = 'force-dynamic';
 
@@ -10,12 +11,13 @@ const mara = TEAM.find((a) => a.id === 'mara')!;
 
 export default async function MaraDashboard({ searchParams }: { searchParams: Promise<{ slot?: string }> }) {
   const { slot: focusSlot } = await searchParams;
-  const [snap, buckets, slotCount, skuCount, slots] = await Promise.all([
+  const [snap, buckets, slotCount, skuCount, slots, revenue] = await Promise.all([
     getLatestSnapshot(),
     getMarginBuckets(),
     getSlotCount(),
     getSkuCount(),
     getSlotsWithMargin(),
+    getMonthlyRevenueComparison(),
   ]);
 
   const focus = focusSlot ? slots.find((s) => s.selecao === focusSlot) : null;
@@ -54,6 +56,31 @@ export default async function MaraDashboard({ searchParams }: { searchParams: Pr
         <Kpi label="Capacidade" value={`${capacity.toFixed(1)}%`} tone={capacity < 40 ? 'red' : capacity < 70 ? 'amber' : 'emerald'} />
         <Kpi label="Snapshots" value="1" />
       </section>
+
+      {/* Gráfico de faturamento mensal */}
+      {revenue.points.length > 0 && (
+        <section className="mt-8 rounded-lg border border-navy/10 bg-white p-5">
+          <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-lg font-semibold text-navy">Faturamento — mês a mês</h2>
+              <p className="text-xs text-navy/55">
+                <span className="inline-block h-2 w-2 rounded-full bg-navy align-middle"></span>{' '}
+                {revenue.monthLabels.thisMonth}: <strong>R$ {revenue.totals.thisMonth.toFixed(2)}</strong> ({revenue.totals.thisMonthDays} dias)
+                {' · '}
+                <span className="inline-block h-2 w-2 rounded-full bg-gold align-middle"></span>{' '}
+                {revenue.monthLabels.lastMonth}: <strong>R$ {revenue.totals.lastMonth.toFixed(2)}</strong> ({revenue.totals.lastMonthDays} dias)
+              </p>
+            </div>
+            {revenue.totals.lastMonth > 0 && (
+              <div className={`rounded px-2 py-1 text-xs font-semibold ${revenue.totals.thisMonth >= revenue.totals.lastMonth ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                {revenue.totals.thisMonth >= revenue.totals.lastMonth ? '↑' : '↓'}{' '}
+                {Math.abs(((revenue.totals.thisMonth - revenue.totals.lastMonth) / revenue.totals.lastMonth) * 100).toFixed(0)}% vs mês anterior
+              </div>
+            )}
+          </header>
+          <RevenueChart points={revenue.points} labels={revenue.monthLabels} />
+        </section>
+      )}
 
       {/* Estoque */}
       {snap && (
