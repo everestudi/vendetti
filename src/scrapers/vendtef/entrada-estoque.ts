@@ -101,6 +101,35 @@ async function loadPurchase(purchaseId: string): Promise<PurchaseSnap> {
   };
 }
 
+function normalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9 ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function similarity(a: string, b: string): number {
+  const ta = new Set(normalize(a).split(' ').filter((t) => t.length >= 2));
+  const tb = new Set(normalize(b).split(' ').filter((t) => t.length >= 2));
+  if (ta.size === 0 || tb.size === 0) return 0;
+  let shared = 0;
+  for (const t of ta) if (tb.has(t)) shared++;
+  const union = new Set([...ta, ...tb]).size;
+  return Math.round((shared / union) * 100);
+}
+
+function bestMatch<T extends { name: string }>(target: string, rows: T[]): { row: T; score: number } | null {
+  let best: { row: T; score: number } | null = null;
+  for (const r of rows) {
+    const score = similarity(target, r.name);
+    if (!best || score > best.score) best = { row: r, score };
+  }
+  return best;
+}
+
 async function dumpFormFields(page: Page, label: string) {
   const fields = await page.evaluate(() => {
     return Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea, button'))
@@ -155,33 +184,77 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
     if (await tipoSelect.count() === 0) throw new Error('select #tipoOperacao não encontrado');
     await tipoSelect.selectOption({ label: 'Entrada de Estoque' });
 
-    // User: "tem que selecionar e esperar um pouco" — o form expande via JS após both selects
-    await page.waitForTimeout(2_000);
+    // User: "tem que selecionar e esperar um pouco" — a tabela expande via JS após both selects
+    await page.waitForTimeout(2_500);
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForSelector('input.qtdes-lancar', { timeout: 15_000 });
     await page.screenshot({ path: `${OUT_DIR}/02-after-tipo.png`, fullPage: true });
-    await dumpFormFields(page, '02-after-tipo');
 
-    // Se ainda não expandiu, tenta clicar Salvar pra ir pra próxima tela
-    const itemFields = await page.locator('input[name*="produto"], input[id*="produto"], .autocomplete, [class*="produto"]').count();
-    if (itemFields === 0) {
-      const salvar = page.locator('button:has-text("Salvar"), input[value="Salvar"]').first();
-      if (await salvar.count() > 0) {
-        await salvar.click();
-        await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
-        await page.waitForTimeout(1_500);
-        await page.screenshot({ path: `${OUT_DIR}/03-after-salvar.png`, fullPage: true });
-        await dumpFormFields(page, '03-after-salvar');
+    // Captura mapping nome do produto → pid_<vendtefId>
+    interface ProductRow { pid: string; name: string }
+    const products: ProductRow[] = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll<HTMLInputElement>('input.qtdes-lancar')).map((inp) => {
+        const tr = inp.closest('tr');
+        const nameCell = tr?.querySelector('td');
+        return {
+          pid: inp.name,
+          name: (nameCell?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+        };
+      });
+    });
+    writeFileSync(`${OUT_DIR}/products-map.json`, JSON.stringify(products, null, 2));
+    console.log(`  ${products.length} produtos disponíveis na tabela`);
+
+    if (purchase.items.length === 0) {
+      return { ok: false, error: 'nenhum item válido (todos sem skuId)' };
+    }
+
+    // Match cada Purchase item contra products
+    const matched: { pid: string; vendtefName: string; ourName: string; qty: number; score: number }[] = [];
+    const unmatched: { ourName: string; qty: number; bestScore: number; bestVendtefName: string }[] = [];
+    for (const it of purchase.items) {
+      const best = bestMatch(it.productName, products);
+      if (best && best.score >= 60) {
+        matched.push({ pid: best.row.pid, vendtefName: best.row.name, ourName: it.productName, qty: it.qty, score: best.score });
+      } else {
+        unmatched.push({ ourName: it.productName, qty: it.qty, bestScore: best?.score ?? 0, bestVendtefName: best?.row.name ?? '—' });
       }
     }
 
-    console.log(`  ⚠️ Purchase ${purchase.id}: form mapeado até segundo nível, items ainda não adicionados`);
-    console.log(`  ${purchase.items.length} items pra adicionar:`);
-    for (const it of purchase.items) {
-      console.log(
-        `    - ${it.code} | ${it.productName.slice(0, 40)} | ${it.qty}× R$${it.unitCost.toFixed(2)}${it.needsCadastro ? ' [PRECISA CADASTRAR]' : ''}`,
-      );
+    writeFileSync(`${OUT_DIR}/match-result.json`, JSON.stringify({ matched, unmatched }, null, 2));
+    console.log(`  matched: ${matched.length}, unmatched: ${unmatched.length}`);
+    for (const m of matched) console.log(`    ✓ ${m.qty}× "${m.ourName}" → ${m.pid} "${m.vendtefName}" (${m.score}%)`);
+    for (const u of unmatched) console.log(`    ✗ "${u.ourName}" — best: ${u.bestScore}% "${u.bestVendtefName}"`);
+
+    if (matched.length === 0) {
+      return { ok: false, error: `nenhum item bate com produtos do Vendtef (${unmatched.length} sem match)` };
     }
-    return { ok: false, error: 'selectors-pending-stage2' };
+
+    // Preenche os qtdes
+    for (const m of matched) {
+      await page.locator(`input[name="${m.pid}"]`).fill(String(m.qty));
+    }
+    await page.screenshot({ path: `${OUT_DIR}/03-filled.png`, fullPage: true });
+
+    // Salva
+    await page.locator('input[name="save"], button:has-text("Salvar")').first().click();
+    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(2_500);
+    await page.screenshot({ path: `${OUT_DIR}/04-after-save.png`, fullPage: true });
+
+    // Sucesso provável se redirecionou pra lista (não na URL de operacoes-estoque)
+    const finalUrl = page.url();
+    const stillOnForm = finalUrl.includes('operacoes-estoque') && !finalUrl.includes('lista');
+    if (stillOnForm) {
+      // Verifica se tem mensagem de erro
+      const errMsg = await page.locator('.alert-danger, .error, [class*="error"]').first().textContent().catch(() => null);
+      return { ok: false, error: `submit pode ter falhado, ainda em ${finalUrl}${errMsg ? ` | ${errMsg.slice(0, 100)}` : ''}` };
+    }
+
+    if (unmatched.length > 0) {
+      return { ok: false, error: `parcial: ${matched.length} OK, ${unmatched.length} sem match no Vendtef` };
+    }
+    return { ok: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await page.screenshot({ path: `${OUT_DIR}/error.png`, fullPage: true }).catch(() => undefined);
