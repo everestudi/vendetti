@@ -111,9 +111,38 @@ function normalize(s: string): string {
     .trim();
 }
 
+// Tokens que distinguem variantes de produto. Se aparecem só de um lado, é falso match.
+const DISCRIMINATING = [
+  'zero',
+  'diet',
+  'light',
+  'frutas vermelhas',
+  'frutas vermelha',
+  'mountain blast',
+  'tropical',
+  'morango',
+  'baunilha',
+];
+
 function similarity(a: string, b: string): number {
-  const ta = new Set(normalize(a).split(' ').filter((t) => t.length >= 2));
-  const tb = new Set(normalize(b).split(' ').filter((t) => t.length >= 2));
+  const na = normalize(a);
+  const nb = normalize(b);
+  // Anti-correlação carbonatação: "sem gas" / "s g" / "sg" vs "c gas" / "c g"
+  const aSemGas = /\b(sem gas|s g|sg)\b/.test(na);
+  const bSemGas = /\b(sem gas|s g|sg)\b/.test(nb);
+  const aComGas = /\b(c gas|c g|com gas)\b/.test(na);
+  const bComGas = /\b(c gas|c g|com gas)\b/.test(nb);
+  if ((aSemGas && bComGas) || (aComGas && bSemGas)) return 0;
+
+  // Discriminating tokens: presença unilateral derruba score
+  for (const tok of DISCRIMINATING) {
+    const inA = na.includes(tok);
+    const inB = nb.includes(tok);
+    if (inA !== inB) return 0;
+  }
+
+  const ta = new Set(na.split(' ').filter((t) => t.length >= 2));
+  const tb = new Set(nb.split(' ').filter((t) => t.length >= 2));
   if (ta.size === 0 || tb.size === 0) return 0;
   let shared = 0;
   for (const t of ta) if (tb.has(t)) shared++;
@@ -225,9 +254,10 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
     }
 
     // Conta quantos sources mappearam pra cada pid (acima do threshold)
+    const MIN_SCORE = 60;
     const claimCount = new Map<string, number>();
     for (const c of candidates) {
-      if (c.bestScore >= 70 && c.bestPid) {
+      if (c.bestScore >= MIN_SCORE && c.bestPid) {
         claimCount.set(c.bestPid, (claimCount.get(c.bestPid) ?? 0) + 1);
       }
     }
@@ -235,8 +265,8 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<{ o
     const matched: { pid: string; vendtefName: string; ourName: string; qty: number; score: number }[] = [];
     const unmatched: { ourName: string; qty: number; bestScore: number; bestVendtefName: string; reason: string }[] = [];
     for (const c of candidates) {
-      if (c.bestScore < 70 || !c.bestPid) {
-        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: c.bestScore < 70 ? 'score baixo' : 'sem candidato' });
+      if (c.bestScore < MIN_SCORE || !c.bestPid) {
+        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: c.bestScore < MIN_SCORE ? 'score baixo' : 'sem candidato' });
       } else if ((claimCount.get(c.bestPid) ?? 0) > 1) {
         unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: `colisão com outro item no ${c.bestPid}` });
       } else {
