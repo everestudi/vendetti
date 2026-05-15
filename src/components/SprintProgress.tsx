@@ -94,7 +94,8 @@ export const SPRINTS: Sprint[] = [
       { label: 'Rita — log de reposição + registro de compra (NFe-ready) no DB (2 tools)', done: true },
       { label: 'Rita — parser da mensagem do Weverton (padrão WhatsApp) → log automático', done: true },
       { label: 'Rita — sync DB → Vendtef via CSV import (zera trabalho manual do Luís)', done: false },
-      { label: 'Lúcia — webhook SAC + state machine reclamação', done: false },
+      { label: 'Lúcia — webhook SAC + state machine reclamação (greet → proof → slot → escalated + ping Luís)', done: true },
+      { label: 'Lúcia — UI /sac com decisão de reembolso (1 clique)', done: true },
     ],
   },
   {

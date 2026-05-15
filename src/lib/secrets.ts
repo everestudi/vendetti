@@ -21,6 +21,7 @@ export const KNOWN_SECRETS = [
   { key: 'LUIS_PHONE', label: 'WhatsApp do Luís (allow contact)', hint: 'Único canal Z-API que pode falar livre com o agente' },
   { key: 'OPERACAO_GROUP_ID', label: 'ID do grupo "Operação TCN Vending Machine"', hint: 'Formato: 1203...@g.us — descubra com npm run zapi:list-groups' },
   { key: 'CRON_SECRET', label: 'CRON_SECRET (Bearer token pro cron)', hint: 'Gere com: openssl rand -base64 32' },
+  { key: 'ZAPI_WEBHOOK_SECRET', label: 'Z-API webhook · shared secret', hint: 'Adicione no header X-Vendetti-Secret na config webhook do Z-API' },
   { key: 'ATACADAO_USER', label: 'Atacadão — usuário (opcional)', hint: 'só se precisar logar p/ ver preço' },
   { key: 'ATACADAO_PASS', label: 'Atacadão — senha (opcional)', hint: '' },
 ] as const;
