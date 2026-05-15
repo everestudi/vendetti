@@ -3,12 +3,12 @@ import { SESSION_COOKIE_NAME, verifySessionCookie } from '@/lib/session';
 
 const PUBLIC_PREFIXES = ['/login', '/api/health', '/_next', '/favicon'];
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   if (PUBLIC_PREFIXES.some((p) => pathname.startsWith(p))) return;
 
   const raw = req.cookies.get(SESSION_COOKIE_NAME)?.value;
-  const session = verifySessionCookie(raw);
+  const session = await verifySessionCookie(raw);
   if (!session) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';

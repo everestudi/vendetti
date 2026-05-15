@@ -16,7 +16,7 @@ export async function login(formData: FormData) {
     redirect('/login?error=Senha inválida');
   }
 
-  const cookie = makeSessionCookie('admin');
+  const cookie = await makeSessionCookie('admin');
   (await cookies()).set(cookie);
   redirect(next);
 }
