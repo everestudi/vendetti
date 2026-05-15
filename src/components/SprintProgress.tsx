@@ -35,9 +35,9 @@ export const SPRINTS: Sprint[] = [
     items: [
       { label: 'Login + SSO entre os 3 portais', done: true },
       { label: 'Crawl 20 URLs (mapa do site)', done: true },
-      { label: 'Modal Seleções (36 slots)', done: true },
-      { label: 'update-slot em produção (5 slots ✓)', done: true },
-      { label: 'Pipeline cron diário', done: false },
+      { label: 'Modal Seleções (36 slots mapeados)', done: true },
+      { label: 'update-slot em produção (5 capacidades ✓)', done: true },
+      { label: 'Pipeline cron diário (worker dedicado)', done: false },
     ],
   },
   {
@@ -47,10 +47,11 @@ export const SPRINTS: Sprint[] = [
     items: [
       { label: 'Extract Vendtef (slots + SKUs + snapshot)', done: true },
       { label: 'Load Postgres com UPSERT', done: true },
-      { label: 'Analytics (margem buckets, snapshot)', done: true },
-      { label: 'Página /mara visual', done: true },
-      { label: 'Cron diário 7h', done: false },
-      { label: 'Ingestão de vendas históricas', done: false },
+      { label: 'Analytics (margem buckets, snapshot, faturamento)', done: true },
+      { label: 'Página /mara dashboard', done: true },
+      { label: 'Ingestão de vendas históricas (1417 trx em 6 chunks)', done: true },
+      { label: 'Ingestão de cancelamentos (128 em 3 meses)', done: true },
+      { label: 'Cron diário 7h automatizado', done: false },
     ],
   },
   {
@@ -58,23 +59,27 @@ export const SPRINTS: Sprint[] = [
     title: 'Sprint 4 · Comunicação',
     subtitle: 'Z-API + Email',
     items: [
-      { label: 'Z-API outbound (sendText)', done: true },
+      { label: 'Z-API outbound (sendText + grupo)', done: true },
       { label: 'Allowlist 3 tiers (admin/SAC/silêncio)', done: true },
-      { label: 'Z-API webhook inbound', done: false },
-      { label: 'Resend deliverability test', done: false },
-      { label: 'Templates SAC scripted', done: false },
+      { label: 'Primeira msg pro Luís entregue ✓', done: true },
+      { label: 'Z-API webhook inbound (Weverton confirma físico)', done: false },
+      { label: 'Resend deliverability test (verificar domínio)', done: false },
+      { label: 'Templates SAC scripted (Lúcia)', done: false },
     ],
   },
   {
     id: 'vendetti',
     title: 'Sprint 5 · Acordar o Vendetti',
-    subtitle: 'Claude Agent SDK + chat',
+    subtitle: 'Claude Agent SDK + chat + decisões',
     items: [
-      { label: 'System prompt + tools registradas', done: false },
-      { label: '/api/chat streaming (Vercel AI SDK)', done: false },
-      { label: 'UI /chat mobile-first', done: false },
-      { label: 'Decision log gravando no DB', done: false },
-      { label: 'Integração tool ↔ Mara/Rita/Zelda', done: false },
+      { label: 'System prompt + 8 tools registradas', done: true },
+      { label: '/api/chat streaming (Vercel AI SDK)', done: true },
+      { label: 'UI /chat mobile-first com tool calls visíveis', done: true },
+      { label: 'Decision log gravando no DB', done: true },
+      { label: 'Tool vendetti_propose_slot_change → Decision', done: true },
+      { label: 'Página /decisions (approve/reject/execute)', done: true },
+      { label: 'Executor automático (Decision APPROVED → scraper)', done: true },
+      { label: 'Vendetti executa preço com fluxo 2-pernas (sistema + grupo TCN)', done: true },
     ],
   },
   {
@@ -82,11 +87,24 @@ export const SPRINTS: Sprint[] = [
     title: 'Sprint 6 · Time completo',
     subtitle: 'Rita, Lúcia, Bruno, Zelda',
     items: [
-      { label: 'Rita — operações + cadastro Vendtef', done: false },
-      { label: 'Lúcia — SAC webhook flow', done: false },
-      { label: 'Bruno — pesquisa Atacadão', done: false },
-      { label: 'Zelda — oversight integrado', done: false },
-      { label: 'Dashboard final de decisões', done: false },
+      { label: 'Rita — visão da máquina em /equipe/rita', done: true },
+      { label: 'Rita — tools de cadastro/swap/abastecimento Vendtef', done: false },
+      { label: 'Lúcia — webhook SAC + state machine reclamação', done: false },
+      { label: 'Bruno — pesquisa Atacadão online + comparativo Vittal', done: false },
+      { label: 'Zelda — oversight integrado (policies.ts no agent loop)', done: false },
+    ],
+  },
+  {
+    id: 'future',
+    title: 'Sprint 7 · Ideias futuras',
+    subtitle: 'hardware + AI extra',
+    items: [
+      { label: '📷 Câmera ESP32-CAM dentro da máquina (audit visual + foto de reclamação + detecta produto preso)', done: false },
+      { label: 'Filtro de data no extract de faturamento diário (hoje pega só mês corrente)', done: false },
+      { label: 'Impressora térmica Brother QL pra etiquetas físicas (se elasticidade exigir)', done: false },
+      { label: 'Multi-máquina (escalar pra outras vending)', done: false },
+      { label: 'Análise semanal estratégica (sazonalidade, mix, A/B price)', done: false },
+      { label: 'Dashboard público (mostrar pra parceiros sem login)', done: false },
     ],
   },
 ];
@@ -99,6 +117,7 @@ export function SprintProgress() {
         const total = s.items.length;
         const pct = (done / total) * 100;
         const fullyDone = done === total;
+        const fresh = done === 0;
         return (
           <article key={s.id} className="rounded-lg border border-navy/10 bg-white p-4">
             <header className="mb-2 flex items-baseline justify-between gap-3">
@@ -108,14 +127,14 @@ export function SprintProgress() {
                 </h3>
                 {s.subtitle && <p className="text-xs text-navy/50">{s.subtitle}</p>}
               </div>
-              <span className={`text-sm font-bold ${fullyDone ? 'text-emerald-700' : 'text-navy/70'}`}>
+              <span className={`text-sm font-bold ${fullyDone ? 'text-emerald-700' : fresh ? 'text-navy/40' : 'text-navy/70'}`}>
                 {done}/{total}
               </span>
             </header>
 
             <div className="mb-3 h-1.5 overflow-hidden rounded-full bg-navy-50">
               <div
-                className={`h-full transition-all ${fullyDone ? 'bg-emerald-500' : pct > 0 ? 'bg-gold' : 'bg-navy/20'}`}
+                className={`h-full transition-all ${fullyDone ? 'bg-emerald-500' : pct > 0 ? 'bg-gold' : 'bg-navy/15'}`}
                 style={{ width: `${pct}%` }}
               />
             </div>
