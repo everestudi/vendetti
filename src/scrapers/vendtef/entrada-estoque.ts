@@ -25,6 +25,7 @@ const OUT_DIR = './tmp/vendtef-entrada';
 const ERP_HOME = 'https://www.erpvending.com.br/';
 const LOGIN_URL = 'https://www.erpvending.com.br/auth/login/index';
 const OPERACOES_URL = 'https://www.erpvending.com.br/erp/operacoes-estoque';
+const PRODUTOS_URL = 'https://www.erpvending.com.br/produtos';
 const HEADLESS = process.env.HEADLESS !== 'false';
 
 async function freshLogin(ctx: BrowserContext) {
@@ -180,6 +181,106 @@ async function dumpFormFields(page: Page, label: string) {
   console.log(`  dump: ${OUT_DIR}/${label}-fields.json (${fields.length} elementos)`);
 }
 
+interface CadastroResult {
+  ok: boolean;
+  vendtefId?: string;
+  error?: string;
+}
+
+/**
+ * Cadastra um produto novo no Vendtef. Tira screenshots e dump de fields em
+ * cada etapa pra auditoria. Defaults: categoria primeira disponível,
+ * unidade "Unidade", preço 0 (Luís define depois).
+ */
+async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCost: number, productCode?: string | null): Promise<CadastroResult> {
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(30_000);
+  const slug = productName.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
+  try {
+    await page.goto(PRODUTOS_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await dismissModals(page);
+    await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-01-lista.png`, fullPage: true });
+
+    // Acha link "Cadastrar Produto" / "Novo" / "Adicionar"
+    const novoBtn = page.locator('a:has-text("Cadastrar Produto"), a:has-text("Novo Produto"), a:has-text("Adicionar"), button:has-text("Cadastrar Produto")').first();
+    if (await novoBtn.count() === 0) {
+      return { ok: false, error: 'botão "Cadastrar Produto" não encontrado em /produtos' };
+    }
+    await novoBtn.click();
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_500);
+    await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-02-form.png`, fullPage: true });
+    await dumpFormFields(page, `cad-${slug}-02-form`);
+
+    // Preencher Nome (heurística: input com name/id "nome" ou "descricao")
+    const nomeField = page.locator('input[name="nome"], input[id="nome"], input[name="descricao"], input[id="descricao"]').first();
+    if (await nomeField.count() === 0) {
+      return { ok: false, error: 'campo nome não encontrado' };
+    }
+    await nomeField.fill(productName);
+
+    // Preencher Código (se tem)
+    if (productCode) {
+      const codeField = page.locator('input[name="codigo"], input[id="codigo"], input[name="gtin"], input[name="ean"]').first();
+      if (await codeField.count() > 0) {
+        await codeField.fill(productCode);
+      }
+    }
+
+    // Preencher Custo
+    const custoField = page.locator('input[name="custo"], input[id="custo"], input[name="valorCusto"], input[id="valorCusto"]').first();
+    if (await custoField.count() > 0) {
+      await custoField.fill(unitCost.toFixed(2).replace('.', ','));
+    }
+
+    // Preencher Preço com 0 (Luís define depois)
+    const precoField = page.locator('input[name="preco"], input[id="preco"], input[name="valorVenda"], input[id="valorVenda"]').first();
+    if (await precoField.count() > 0) {
+      await precoField.fill('0,00');
+    }
+
+    // Categoria: escolhe primeira opção não-vazia se select obrigatório
+    const catSelect = page.locator('select[name="categoria"], select[id="categoria"], select[name="categoriaProduto"]').first();
+    if (await catSelect.count() > 0) {
+      const opts = await catSelect.locator('option').allInnerTexts();
+      const firstReal = opts.findIndex((t) => t.trim() && !/selecione|escolha/i.test(t));
+      if (firstReal > 0) await catSelect.selectOption({ index: firstReal });
+    }
+
+    // Unidade Comercial
+    const uncomSelect = page.locator('select[name="uncom"], select[id="uncom"], select[name="unidadeComercial"]').first();
+    if (await uncomSelect.count() > 0) {
+      await uncomSelect.selectOption({ label: 'Unidade' }).catch(() => undefined);
+    }
+
+    await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-03-filled.png`, fullPage: true });
+
+    // Submit
+    const salvarBtn = page.locator('button:has-text("Salvar"), input[value="Salvar"], button[type="submit"]').first();
+    if (await salvarBtn.count() === 0) {
+      return { ok: false, error: 'botão Salvar não encontrado no form de cadastro' };
+    }
+    await salvarBtn.click();
+    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => undefined);
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-04-saved.png`, fullPage: true });
+
+    // Verifica mensagem de sucesso/erro
+    const txt = (await page.locator('body').textContent({ timeout: 1_000 }).catch(() => '')) ?? '';
+    if (/erro|inv[áa]lido|obrigat/i.test(txt) && !/sucesso|salvo|cadastrado/i.test(txt)) {
+      return { ok: false, error: `cadastro pode ter falhado — verificar artifact cad-${slug}-04-saved.png` };
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-error.png`, fullPage: true }).catch(() => undefined);
+    return { ok: false, error: msg };
+  } finally {
+    await page.close();
+  }
+}
+
 async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<SyncResult> {
   const page = await ctx.newPage();
   page.setDefaultTimeout(30_000);
@@ -191,95 +292,109 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<Syn
     }
     await dismissModals(page);
 
-    // === FLUXO: Operações de Estoque ===
-    await page.goto(OPERACOES_URL, { waitUntil: 'domcontentloaded' });
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-    await dismissModals(page);
-    await page.screenshot({ path: `${OUT_DIR}/01-operacoes-form.png`, fullPage: true });
-    await dumpFormFields(page, '01-operacoes');
-
-    // Estoque: select#estoque — escolhe "Estoque Everest"
-    const estoqueSelect = page.locator('#estoque');
-    if (await estoqueSelect.count() === 0) throw new Error('select #estoque não encontrado');
-    const estoqueOpts = await estoqueSelect.locator('option').allTextContents();
-    const everestIdx = estoqueOpts.findIndex((o) => /everest/i.test(o));
-    if (everestIdx < 0) throw new Error('"Estoque Everest" não está na lista');
-    await estoqueSelect.selectOption({ index: everestIdx });
-    await page.waitForTimeout(500);
-
-    // Tipo: select#tipoOperacao — escolhe "Entrada de Estoque"
-    const tipoSelect = page.locator('#tipoOperacao');
-    if (await tipoSelect.count() === 0) throw new Error('select #tipoOperacao não encontrado');
-    await tipoSelect.selectOption({ label: 'Entrada de Estoque' });
-
-    // User: "tem que selecionar e esperar um pouco" — a tabela expande via JS após both selects
-    await page.waitForTimeout(2_500);
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-    await page.waitForSelector('input.qtdes-lancar', { timeout: 15_000 });
-    await page.screenshot({ path: `${OUT_DIR}/02-after-tipo.png`, fullPage: true });
-
-    // Captura mapping nome do produto → pid_<vendtefId>
     interface ProductRow { pid: string; name: string }
-    const products: ProductRow[] = await page.evaluate(() => {
-      return Array.from(document.querySelectorAll<HTMLInputElement>('input.qtdes-lancar')).map((inp) => {
-        const tr = inp.closest('tr');
-        const nameCell = tr?.querySelector('td');
+    interface MatchedRow { pid: string; vendtefName: string; ourName: string; qty: number; score: number }
+    interface UnmatchedRow { ourName: string; qty: number; bestScore: number; bestVendtefName: string; reason: string }
+
+    const MIN_SCORE = 60;
+
+    const doMatch = (items: typeof purchase.items, products: ProductRow[]): { matched: MatchedRow[]; unmatched: UnmatchedRow[] } => {
+      const candidates = items.map((it) => {
+        const best = bestMatch(it.productName, products);
         return {
-          pid: inp.name,
-          name: (nameCell?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          ourName: it.productName,
+          qty: it.qty,
+          bestPid: best?.row.pid ?? '',
+          bestVendtefName: best?.row.name ?? '—',
+          bestScore: best?.score ?? 0,
         };
       });
-    });
-    writeFileSync(`${OUT_DIR}/products-map.json`, JSON.stringify(products, null, 2));
-    console.log(`  ${products.length} produtos disponíveis na tabela`);
+      const claimCount = new Map<string, number>();
+      for (const c of candidates) {
+        if (c.bestScore >= MIN_SCORE && c.bestPid) claimCount.set(c.bestPid, (claimCount.get(c.bestPid) ?? 0) + 1);
+      }
+      const matched: MatchedRow[] = [];
+      const unmatched: UnmatchedRow[] = [];
+      for (const c of candidates) {
+        if (c.bestScore < MIN_SCORE || !c.bestPid) {
+          unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: 'score baixo' });
+        } else if ((claimCount.get(c.bestPid) ?? 0) > 1) {
+          unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: `colisão pid=${c.bestPid}` });
+        } else {
+          matched.push({ pid: c.bestPid, vendtefName: c.bestVendtefName, ourName: c.ourName, qty: c.qty, score: c.bestScore });
+        }
+      }
+      return { matched, unmatched };
+    };
+
+    const openEntradaAndCaptureProducts = async (label: string): Promise<ProductRow[]> => {
+      await page.goto(OPERACOES_URL, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+      await dismissModals(page);
+      const estoque = page.locator('#estoque');
+      const estoqueOpts = await estoque.locator('option').allTextContents();
+      const everestIdx = estoqueOpts.findIndex((o) => /everest/i.test(o));
+      if (everestIdx < 0) throw new Error('"Estoque Everest" não está na lista');
+      await estoque.selectOption({ index: everestIdx });
+      await page.waitForTimeout(500);
+      await page.locator('#tipoOperacao').selectOption({ label: 'Entrada de Estoque' });
+      await page.waitForTimeout(2_500);
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+      await page.waitForSelector('input.qtdes-lancar', { timeout: 15_000 });
+      await page.screenshot({ path: `${OUT_DIR}/${label}.png`, fullPage: true });
+      return await page.evaluate(() => {
+        return Array.from(document.querySelectorAll<HTMLInputElement>('input.qtdes-lancar')).map((inp) => {
+          const tr = inp.closest('tr');
+          const nameCell = tr?.querySelector('td');
+          return {
+            pid: inp.name,
+            name: (nameCell?.textContent ?? '').replace(/\s+/g, ' ').trim(),
+          };
+        });
+      });
+    };
 
     if (purchase.items.length === 0) {
       return { ok: false, error: 'nenhum item válido (todos sem skuId)' };
     }
 
-    // Match cada Purchase item contra products. Threshold 70.
-    // Se 2 source items reclamam o mesmo pid (ex: C/G vs S/G mappeando pro único Água C Gás),
-    // ambos viram unmatched — Luís resolve manual depois.
-    const candidates: { ourName: string; qty: number; bestPid: string; bestVendtefName: string; bestScore: number }[] = [];
-    for (const it of purchase.items) {
-      const best = bestMatch(it.productName, products);
-      candidates.push({
-        ourName: it.productName,
-        qty: it.qty,
-        bestPid: best?.row.pid ?? '',
-        bestVendtefName: best?.row.name ?? '—',
-        bestScore: best?.score ?? 0,
-      });
-    }
+    // === Pass 1: tenta entrada com produtos existentes ===
+    let products = await openEntradaAndCaptureProducts('02-after-tipo');
+    console.log(`  pass1: ${products.length} produtos disponíveis`);
 
-    // Conta quantos sources mappearam pra cada pid (acima do threshold)
-    const MIN_SCORE = 60;
-    const claimCount = new Map<string, number>();
-    for (const c of candidates) {
-      if (c.bestScore >= MIN_SCORE && c.bestPid) {
-        claimCount.set(c.bestPid, (claimCount.get(c.bestPid) ?? 0) + 1);
+    let { matched, unmatched } = doMatch(purchase.items, products);
+    console.log(`  pass1: ${matched.length} matched, ${unmatched.length} unmatched`);
+
+    // === Pass 2: cadastra unmatched, refaz entrada ===
+    const cadastros: { ourName: string; result: CadastroResult }[] = [];
+    if (unmatched.length > 0) {
+      console.log(`  → tentando cadastrar ${unmatched.length} produtos faltantes…`);
+      for (const u of unmatched) {
+        const item = purchase.items.find((it) => it.productName === u.ourName);
+        const unitCost = item?.unitCost ?? 0;
+        const productCode = item?.code && !item.code.startsWith('NFE-') ? item.code : undefined;
+        const r = await cadastrarProduto(ctx, u.ourName, unitCost, productCode);
+        cadastros.push({ ourName: u.ourName, result: r });
+        console.log(`    ${r.ok ? '✓' : '✗'} ${u.ourName}${r.error ? ` — ${r.error.slice(0, 80)}` : ''}`);
       }
+      writeFileSync(`${OUT_DIR}/cadastros.json`, JSON.stringify(cadastros, null, 2));
+
+      // Reabre entrada pra ver os novos
+      products = await openEntradaAndCaptureProducts('06-after-cadastros');
+      console.log(`  pass2: ${products.length} produtos disponíveis (era ${products.length - cadastros.filter((c) => c.result.ok).length} antes)`);
+      const remat = doMatch(purchase.items, products);
+      matched = remat.matched;
+      unmatched = remat.unmatched;
+      console.log(`  pass2: ${matched.length} matched, ${unmatched.length} unmatched`);
     }
 
-    const matched: { pid: string; vendtefName: string; ourName: string; qty: number; score: number }[] = [];
-    const unmatched: { ourName: string; qty: number; bestScore: number; bestVendtefName: string; reason: string }[] = [];
-    for (const c of candidates) {
-      if (c.bestScore < MIN_SCORE || !c.bestPid) {
-        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: c.bestScore < MIN_SCORE ? 'score baixo' : 'sem candidato' });
-      } else if ((claimCount.get(c.bestPid) ?? 0) > 1) {
-        unmatched.push({ ourName: c.ourName, qty: c.qty, bestScore: c.bestScore, bestVendtefName: c.bestVendtefName, reason: `colisão com outro item no ${c.bestPid}` });
-      } else {
-        matched.push({ pid: c.bestPid, vendtefName: c.bestVendtefName, ourName: c.ourName, qty: c.qty, score: c.bestScore });
-      }
-    }
-
+    writeFileSync(`${OUT_DIR}/products-map.json`, JSON.stringify(products, null, 2));
     writeFileSync(`${OUT_DIR}/match-result.json`, JSON.stringify({ matched, unmatched }, null, 2));
-    console.log(`  matched: ${matched.length}, unmatched: ${unmatched.length}`);
     for (const m of matched) console.log(`    ✓ ${m.qty}× "${m.ourName}" → ${m.pid} "${m.vendtefName}" (${m.score}%)`);
     for (const u of unmatched) console.log(`    ✗ "${u.ourName}" — ${u.reason} (best: ${u.bestScore}% "${u.bestVendtefName}")`);
 
     if (matched.length === 0) {
-      return { ok: false, error: `nenhum item bate com Vendtef (${unmatched.length} unmatched)` };
+      return { ok: false, error: `nenhum item bate com Vendtef (${unmatched.length} unmatched, ${cadastros.filter((c) => !c.result.ok).length} falha no cadastro)` };
     }
 
     // Preenche qtdes
