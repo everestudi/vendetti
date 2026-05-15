@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 
@@ -36,6 +36,14 @@ const brl = (n: number) =>
   n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
 
 export default function NovaCompraPage() {
+  return (
+    <Suspense fallback={<div className="mx-auto max-w-5xl px-4 py-8 text-sm text-navy/60">Carregando…</div>}>
+      <NovaCompraInner />
+    </Suspense>
+  );
+}
+
+function NovaCompraInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const prefillId = searchParams.get('prefill');
