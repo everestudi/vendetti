@@ -47,6 +47,14 @@ interface PolicyResult {
   blocked?: boolean; // se true, nem com aprovação humana pode rodar
 }
 
+/**
+ * Toda mudança de preço requer DUAS execuções em sequência:
+ * 1. sistema (Vendtef via scraper update-slot)
+ * 2. físico (Weverton ajusta no painel da máquina + etiqueta)
+ *
+ * Por isso PriceChange nunca é totalmente 🟢 — sempre passa por
+ * AWAITING_PHYSICAL aguardando confirmação do Weverton no grupo.
+ */
 export function evalPriceChange(input: {
   currentPrice: number;
   newPrice: number;
@@ -65,9 +73,15 @@ export function evalPriceChange(input: {
 
   const deltaPct = Math.abs((newPrice - currentPrice) / currentPrice) * 100;
   if (deltaPct <= LIMITS.priceChange.autoBandPct) {
-    return { level: 'GREEN', reason: `Δ${deltaPct.toFixed(1)}% dentro da banda autônoma ±${LIMITS.priceChange.autoBandPct}%.` };
+    return {
+      level: 'GREEN',
+      reason: `Δ${deltaPct.toFixed(1)}% dentro da banda autônoma ±${LIMITS.priceChange.autoBandPct}%. Após executar, fica AWAITING_PHYSICAL até Weverton confirmar.`,
+    };
   }
-  return { level: 'YELLOW', reason: `Δ${deltaPct.toFixed(1)}% fora da banda — pedindo aprovação.` };
+  return {
+    level: 'YELLOW',
+    reason: `Δ${deltaPct.toFixed(1)}% fora da banda — pedindo aprovação. Após aprovar, fica AWAITING_PHYSICAL até Weverton confirmar.`,
+  };
 }
 
 export function evalRestock(input: { totalBRL: number; weeklySpentBRL: number }): PolicyResult {

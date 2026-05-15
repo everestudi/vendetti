@@ -20,6 +20,7 @@
     "scrape:selecoes": "dotenv -e .env.local -- tsx src/scrapers/vendtef/selecoes.ts",
     "slot:update": "dotenv -e .env.local -- tsx src/scrapers/vendtef/update-slot.ts",
     "mara:sync": "dotenv -e .env.local -- tsx src/lib/vendetti/mara/run.ts",
+    "zapi:list-groups": "dotenv -e .env.local -- tsx src/scripts/zapi-list-groups.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts"
   },

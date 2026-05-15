@@ -106,6 +106,7 @@ export const TEAM: Agent[] = [
     ],
     tools: [
       'whatsapp_send (Z-API outbound)',
+      'whatsapp_send_grupo_operacao (Z-API outbound)',
       'claude_vision',
       'vendtef_create_sku',
       'vendtef_swap_slot',

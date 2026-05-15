@@ -184,10 +184,11 @@ enum AutonomyLevel {
 }
 
 enum DecisionStatus {
-  PENDING
-  APPROVED
+  PENDING                       // aguarda aprovação do Luís
+  APPROVED                      // Luís aprovou — Rita vai executar
   REJECTED
-  EXECUTED
+  AWAITING_PHYSICAL             // sistema atualizado, aguarda Weverton confirmar mudança física (etiqueta/painel)
+  EXECUTED                      // tudo concluído (sistema + físico)
   FAILED
 }
 

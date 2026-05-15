@@ -19,6 +19,7 @@ export const KNOWN_SECRETS = [
   { key: 'ZAPI_CLIENT_TOKEN', label: 'Z-API — client token', hint: 'painel Z-API → segurança' },
   { key: 'WEVERTON_PHONE', label: 'WhatsApp do Weverton', hint: '+5534999999999 (com código país)' },
   { key: 'LUIS_PHONE', label: 'WhatsApp do Luís (allow contact)', hint: 'Único canal Z-API que pode falar livre com o agente' },
+  { key: 'OPERACAO_GROUP_ID', label: 'ID do grupo "Operação TCN Vending Machine"', hint: 'Formato: 1203...@g.us — descubra com npm run zapi:list-groups' },
   { key: 'ATACADAO_USER', label: 'Atacadão — usuário (opcional)', hint: 'só se precisar logar p/ ver preço' },
   { key: 'ATACADAO_PASS', label: 'Atacadão — senha (opcional)', hint: '' },
 ] as const;

@@ -19,6 +19,18 @@ function normalizePhone(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
+/**
+ * Envia mensagem para o grupo "Operação TCN Vending Machine".
+ * O group ID fica em `OPERACAO_GROUP_ID` (cifrado no DB). Formato: `1203...@g.us`.
+ */
+export async function sendToOperacaoGroup(message: string): Promise<SendResult> {
+  const groupId = await getSecret('OPERACAO_GROUP_ID');
+  if (!groupId) {
+    return { ok: false, error: 'OPERACAO_GROUP_ID ausente — rode `npm run zapi:list-groups` e cole o ID no /settings' };
+  }
+  return sendText(groupId, message);
+}
+
 export async function sendText(phone: string, message: string): Promise<SendResult> {
   const [instance, token, clientToken] = await Promise.all([
     getSecret('ZAPI_INSTANCE'),
