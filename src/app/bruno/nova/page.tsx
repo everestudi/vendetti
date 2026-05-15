@@ -16,6 +16,7 @@ interface ParsedItem {
   qty: number;
   unitCost: number;
   totalCost: number;
+  originalUnitCost?: number;
   skuMatch?: SkuMatch;
 }
 interface ParsedDoc {
@@ -23,13 +24,26 @@ interface ParsedDoc {
   supplierName: string | null;
   invoiceRef: string | null;
   occurredAt: string | null;
+  subtotalAmount?: number | null;
+  discountAmount?: number;
   totalAmount: number;
   items: ParsedItem[];
+}
+
+interface SkuOption {
+  id: string;
+  code: string;
+  name: string;
+  category: string;
+  cost: number;
+  price: number;
 }
 
 interface EditableItem extends ParsedItem {
   /// linkar ao SKU sugerido ('match'), criar novo ('new'), ou ignorar ('skip')
   action: 'match' | 'new' | 'skip';
+  /// SKU vinculado manualmente (sobrescreve skuMatch quando action === 'match')
+  manualSku?: SkuOption;
 }
 
 const brl = (n: number) =>
@@ -134,7 +148,8 @@ function NovaCompraInner() {
         items: items
           .filter((it) => it.action !== 'skip')
           .map((it) => ({
-            skuId: it.action === 'match' ? it.skuMatch?.id ?? null : null,
+            skuId:
+              it.action === 'match' ? it.manualSku?.id ?? it.skuMatch?.id ?? null : null,
             productName: it.productName,
             productCode: it.productCode ?? null,
             qty: it.qty,
@@ -241,6 +256,17 @@ function NovaCompraInner() {
               <Field label="Data" value={parsed.occurredAt ?? '—'} />
               <Field label="Total NF" value={brl(parsed.totalAmount)} />
             </div>
+            {(parsed.discountAmount ?? 0) > 0 && (
+              <div className="mt-3 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                💸 Desconto da NF: <strong>{brl(parsed.discountAmount!)}</strong>
+                {parsed.subtotalAmount && (
+                  <> · Subtotal antes do desconto: {brl(parsed.subtotalAmount)}</>
+                )}
+                <span className="ml-1 text-emerald-700/70">
+                  — rateado proporcionalmente nos itens (custo unit ajustado)
+                </span>
+              </div>
+            )}
           </div>
 
           <div className="rounded-lg border border-navy/15 bg-white">
@@ -255,7 +281,7 @@ function NovaCompraInner() {
             <ul className="divide-y divide-navy/10">
               {items.map((it, i) => (
                 <li key={i} className="px-4 py-3">
-                  <div className="grid grid-cols-12 items-center gap-2 text-sm">
+                  <div className="grid grid-cols-12 items-start gap-2 text-sm">
                     <input
                       className="col-span-4 rounded border border-navy/15 px-2 py-1"
                       value={it.productName}
@@ -267,31 +293,28 @@ function NovaCompraInner() {
                       value={it.qty}
                       onChange={(e) => updateItem(i, { qty: parseInt(e.target.value) || 0 })}
                     />
-                    <span className="col-span-1 text-center text-navy/50">×</span>
-                    <input
-                      className="col-span-2 rounded border border-navy/15 px-2 py-1 text-right"
-                      type="number"
-                      step="0.01"
-                      value={it.unitCost}
-                      onChange={(e) => {
-                        const v = parseFloat(e.target.value) || 0;
-                        updateItem(i, { unitCost: v, totalCost: v * it.qty });
-                      }}
-                    />
-                    <span className="col-span-1 text-right text-navy/70">{brl(it.totalCost)}</span>
-                    <select
-                      className="col-span-3 rounded border border-navy/15 px-2 py-1"
-                      value={it.action}
-                      onChange={(e) => updateItem(i, { action: e.target.value as EditableItem['action'] })}
-                    >
-                      <option value="match" disabled={!it.skuMatch}>
-                        {it.skuMatch
-                          ? `↪ vincular ${it.skuMatch.name.slice(0, 30)} (${it.skuMatch.score}%)`
-                          : '↪ sem match'}
-                      </option>
-                      <option value="new">＋ criar SKU novo</option>
-                      <option value="skip">⨯ ignorar</option>
-                    </select>
+                    <span className="col-span-1 pt-1 text-center text-navy/50">×</span>
+                    <div className="col-span-2">
+                      <input
+                        className="w-full rounded border border-navy/15 px-2 py-1 text-right"
+                        type="number"
+                        step="0.01"
+                        value={it.unitCost}
+                        onChange={(e) => {
+                          const v = parseFloat(e.target.value) || 0;
+                          updateItem(i, { unitCost: v, totalCost: v * it.qty });
+                        }}
+                      />
+                      {it.originalUnitCost != null && it.originalUnitCost !== it.unitCost && (
+                        <div className="mt-0.5 text-[10px] text-navy/40">
+                          NF: {brl(it.originalUnitCost)}
+                        </div>
+                      )}
+                    </div>
+                    <span className="col-span-1 pt-1 text-right text-navy/70">{brl(it.totalCost)}</span>
+                    <div className="col-span-3">
+                      <SkuLinker item={it} onChange={(patch) => updateItem(i, patch)} />
+                    </div>
                   </div>
                 </li>
               ))}
@@ -340,6 +363,124 @@ function NovaCompraInner() {
         </section>
       )}
     </main>
+  );
+}
+
+function SkuLinker({
+  item,
+  onChange,
+}: {
+  item: EditableItem;
+  onChange: (patch: Partial<EditableItem>) => void;
+}) {
+  const [searching, setSearching] = useState(false);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<SkuOption[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!searching) return;
+    if (q.trim().length < 2) {
+      setResults([]);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    const handle = setTimeout(() => {
+      fetch(`/api/bruno-nfe/sku-search?q=${encodeURIComponent(q.trim())}`)
+        .then((r) => r.json())
+        .then((j) => {
+          if (cancelled) return;
+          setResults(j.results ?? []);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(handle);
+    };
+  }, [q, searching]);
+
+  const linkedSku = item.manualSku ?? (item.action === 'match' ? item.skuMatch : null);
+
+  if (searching) {
+    return (
+      <div className="space-y-1">
+        <input
+          autoFocus
+          className="w-full rounded border border-navy/40 px-2 py-1"
+          placeholder="buscar SKU (ex: powerade)…"
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        {loading && <div className="text-[10px] text-navy/40">buscando…</div>}
+        {results.length > 0 && (
+          <ul className="max-h-40 overflow-y-auto rounded border border-navy/15 bg-white text-xs shadow-sm">
+            {results.map((r) => (
+              <li key={r.id}>
+                <button
+                  type="button"
+                  className="block w-full px-2 py-1.5 text-left hover:bg-navy/5"
+                  onClick={() => {
+                    onChange({
+                      action: 'match',
+                      manualSku: r,
+                    });
+                    setSearching(false);
+                    setQ('');
+                  }}
+                >
+                  <div className="font-medium text-navy">{r.name}</div>
+                  <div className="text-[10px] text-navy/50">
+                    {r.code} · {r.category}
+                  </div>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {!loading && q.trim().length >= 2 && results.length === 0 && (
+          <div className="text-[10px] text-navy/40">nenhum SKU encontrado</div>
+        )}
+        <button
+          type="button"
+          className="text-[10px] text-navy/50 underline"
+          onClick={() => {
+            setSearching(false);
+            setQ('');
+          }}
+        >
+          cancelar busca
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <select
+        className="w-full rounded border border-navy/15 px-2 py-1"
+        value={item.action}
+        onChange={(e) => onChange({ action: e.target.value as EditableItem['action'], manualSku: undefined })}
+      >
+        <option value="match" disabled={!linkedSku}>
+          {linkedSku
+            ? `↪ ${item.manualSku ? '🔗' : `${item.skuMatch?.score ?? 0}%`} ${linkedSku.name.slice(0, 28)}`
+            : '↪ sem match'}
+        </option>
+        <option value="new">＋ criar SKU novo</option>
+        <option value="skip">⨯ ignorar</option>
+      </select>
+      <button
+        type="button"
+        className="text-[10px] text-navy/60 underline hover:text-navy"
+        onClick={() => setSearching(true)}
+      >
+        🔍 buscar SKU manual
+      </button>
+    </div>
   );
 }
 

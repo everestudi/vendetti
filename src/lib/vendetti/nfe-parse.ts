@@ -13,8 +13,13 @@ export interface NfeParsedItem {
   productName: string;
   productCode?: string;
   qty: number;
+  /// Custo unitário efetivo (já com desconto rateado, se houver).
   unitCost: number;
+  /// Total efetivo (qty × unitCost) — já com desconto rateado.
   totalCost: number;
+  /// Custo unitário ORIGINAL impresso na NF, antes do rateio de desconto.
+  /// Igual a unitCost quando não há desconto global.
+  originalUnitCost?: number;
   /// Sugestão de SKU existente — null se não achou
   skuMatch?: {
     id: string;
@@ -29,6 +34,11 @@ export interface NfeParsedDoc {
   supplierName: string | null;
   invoiceRef: string | null;
   occurredAt: string | null; // ISO date
+  /// Soma bruta dos itens (antes de desconto). Pode vir null se vision não detectar.
+  subtotalAmount?: number | null;
+  /// Desconto total aplicado no rodapé da NF (Assaí, p.ex.). 0 se não houver.
+  discountAmount?: number;
+  /// Total final pago (após desconto).
   totalAmount: number;
   items: NfeParsedItem[];
   rawText?: string;
@@ -38,17 +48,19 @@ const SYSTEM_PROMPT = `Você é um extrator de NF-e/DANFE/cupom fiscal brasileir
 Sua tarefa: extrair dados estruturados em JSON do documento.
 
 Regras:
-- "supplierName" é a razão social do emitente (quem vendeu).
+- "supplierName" é a razão social do emitente (quem vendeu). Atacadão e Assaí são distintos: se for Assaí, use OUTRO em "supplier" e ponha "Assaí" em "supplierName".
 - "supplier" deve ser ATACADAO se o emitente for ATACADAO/Atacadão, VITTAL se for Vittal, senão OUTRO.
 - "invoiceRef" é o nº da NF-e (campo "Número" ou "NF" — número longo no topo).
 - "occurredAt" é a data de emissão no formato ISO yyyy-mm-dd.
-- "totalAmount" é o valor total da nota (com impostos).
-- Para cada item, extraia:
+- "subtotalAmount" é a soma bruta dos itens (antes de qualquer desconto no rodapé). Se a NF mostrar "Subtotal", use; senão calcule pela soma dos valores totais dos itens. Se não tiver certeza, use null.
+- "discountAmount" é o desconto global aplicado no rodapé da NF (Assaí costuma fazer isso, exibido como "Desconto" ou "Vlr Desc"). Se não houver desconto global, use 0.
+- "totalAmount" é o valor total final pago (após desconto). Costuma vir como "Valor Total", "Total a Pagar" ou "Total Líquido".
+- Para cada item, extraia o valor IMPRESSO na NF (sem aplicar desconto global, esse rateio é feito depois):
   * productName: descrição completa do produto exatamente como na NF
   * productCode: código do produto (GTIN/EAN/código interno do fornecedor), se houver
   * qty: quantidade (inteiro; se vier 2,000 trata como 2)
-  * unitCost: valor unitário (decimal, R$)
-  * totalCost: valor total do item (qty × unitCost)
+  * unitCost: valor unitário impresso (decimal, R$)
+  * totalCost: valor total impresso do item (qty × unitCost)
 - Se algum campo não estiver claro, use null (não invente).
 - Retorne APENAS JSON válido, sem markdown, sem explicação.`;
 
@@ -58,6 +70,8 @@ const USER_PROMPT = `Extraia os dados estruturados desse documento NF-e/DANFE/cu
   "supplierName": string | null,
   "invoiceRef": string | null,
   "occurredAt": "yyyy-mm-dd" | null,
+  "subtotalAmount": number | null,
+  "discountAmount": number,
   "totalAmount": number,
   "items": [
     { "productName": string, "productCode": string | null, "qty": number, "unitCost": number, "totalCost": number }
@@ -110,21 +124,49 @@ export async function parseNfeFromBase64(
     throw new Error(`Vision retornou JSON inválido: ${(err as Error).message}\n---\n${raw.slice(0, 500)}`);
   }
 
+  // Rateio do desconto global (caso Assaí etc): distribui proporcionalmente
+  // ao peso de cada item no subtotal. Preserva o original em originalUnitCost.
+  const discountAmount = parsed.discountAmount ?? 0;
+  const subtotal =
+    parsed.subtotalAmount ?? parsed.items.reduce((s, it) => s + (it.totalCost || 0), 0);
+  const discountRatio = discountAmount > 0 && subtotal > 0 ? discountAmount / subtotal : 0;
+
+  const proratedItems = parsed.items.map((it) => {
+    if (discountRatio === 0) {
+      return { ...it, originalUnitCost: it.unitCost };
+    }
+    const originalUnitCost = it.unitCost;
+    const adjustedUnit = round2(it.unitCost * (1 - discountRatio));
+    const adjustedTotal = round2(adjustedUnit * it.qty);
+    return {
+      ...it,
+      originalUnitCost,
+      unitCost: adjustedUnit,
+      totalCost: adjustedTotal,
+    };
+  });
+
   // Fuzzy match com SKUs existentes
   const allSkus = await prisma.sku.findMany({
     where: { active: true },
     select: { id: true, code: true, name: true, supplierSkuCode: true },
   });
 
-  const matchedItems: NfeParsedItem[] = parsed.items.map((it) => ({
+  const matchedItems: NfeParsedItem[] = proratedItems.map((it) => ({
     ...it,
     skuMatch: matchSku(it, allSkus),
   }));
 
   return {
     ...parsed,
+    subtotalAmount: parsed.subtotalAmount ?? null,
+    discountAmount,
     items: matchedItems,
   };
+}
+
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
 }
 
 function matchSku(
