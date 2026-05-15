@@ -219,90 +219,61 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string, unitCo
     });
     writeFileSync(`${OUT_DIR}/cad-${slug}-01-topactions.json`, JSON.stringify(topActions, null, 2));
 
-    // Tenta várias estratégias pra abrir cadastro
-    let opened = false;
-    const tryUrls = ['/produtos/cadastrar', '/produtos/cadastro', '/produtos/novo', '/produtos/new'];
-    for (const path of tryUrls) {
-      await page.goto(`https://www.erpvending.com.br${path}`, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
-      const url = page.url();
-      // Se redirecionou pra /produtos (lista), não existe
-      if (!url.match(/\/produtos\/?$/) && !url.includes('404')) {
-        const hasNomeField = await page.locator('input[name="nome"], input[id="nome"], input[name="descricao"]').count();
-        if (hasNomeField > 0) {
-          opened = true;
-          console.log(`  ✓ form de cadastro em ${path}`);
-          break;
-        }
-      }
+    // Botão #addProd na página /produtos (mapeado via topactions dump)
+    const addBtn = page.locator('#addProd');
+    if (await addBtn.count() === 0) {
+      return { ok: false, error: '#addProd não existe — UI do Vendtef mudou?' };
     }
-
-    if (!opened) {
-      // Volta pra lista e procura botão de cadastrar de várias formas
-      await page.goto(PRODUTOS_URL, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
-      const novoBtn = page.locator(
-        'a:has-text("Cadastrar Produto"), a:has-text("Novo Produto"), a:has-text("Adicionar"), a:has-text("Cadastrar"), a:has-text("Novo"), button:has-text("Cadastrar"), button:has-text("Novo"), a[title*="Cadastr" i], a[title*="Novo" i], .btn-add, .btn-novo, .fa-plus, i.fa-plus',
-      ).first();
-      if (await novoBtn.count() > 0) {
-        await novoBtn.click();
-        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-        await page.waitForTimeout(1_500);
-        opened = true;
-      }
-    }
-
-    if (!opened) {
-      return { ok: false, error: 'não consegui abrir o form de cadastro de produto — ver cad-*-01-topactions.json' };
-    }
+    await addBtn.click();
+    await page.waitForTimeout(1_500);
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
     await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-02-form.png`, fullPage: true });
     await dumpFormFields(page, `cad-${slug}-02-form`);
 
+    // Procura form em modal visível primeiro (pode ser que addProd abra modal)
+    const modalSel = '.modal:visible, [role="dialog"]:visible';
+    const inModal = await page.locator(modalSel).count() > 0;
+    const scope = inModal ? page.locator(modalSel).first() : page;
+
     // Preencher Nome (heurística: input com name/id "nome" ou "descricao")
-    const nomeField = page.locator('input[name="nome"], input[id="nome"], input[name="descricao"], input[id="descricao"]').first();
+    const nomeField = scope.locator('input[name="nome"], input[id="nome"], input[name="descricao"], input[id="descricao"]').last();
     if (await nomeField.count() === 0) {
-      return { ok: false, error: 'campo nome não encontrado' };
+      return { ok: false, error: `campo nome não encontrado (inModal=${inModal})` };
     }
     await nomeField.fill(productName);
 
-    // Preencher Código (se tem)
+    // Preencher Código (se tem) — no modal de cadastro provavelmente também tem
     if (productCode) {
-      const codeField = page.locator('input[name="codigo"], input[id="codigo"], input[name="gtin"], input[name="ean"]').first();
-      if (await codeField.count() > 0) {
-        await codeField.fill(productCode);
-      }
+      const codeField = scope.locator('input[name="codigo"], input[id="codigo"], input[name="gtin"], input[name="ean"]').last();
+      if (await codeField.count() > 0) await codeField.fill(productCode);
     }
 
     // Preencher Custo
-    const custoField = page.locator('input[name="custo"], input[id="custo"], input[name="valorCusto"], input[id="valorCusto"]').first();
-    if (await custoField.count() > 0) {
-      await custoField.fill(unitCost.toFixed(2).replace('.', ','));
-    }
+    const custoField = scope.locator('input[name="custo"], input[id="custo"], input[name="valorCusto"], input[id="valorCusto"], input[name="preco_custo"]').last();
+    if (await custoField.count() > 0) await custoField.fill(unitCost.toFixed(2).replace('.', ','));
 
     // Preencher Preço com 0 (Luís define depois)
-    const precoField = page.locator('input[name="preco"], input[id="preco"], input[name="valorVenda"], input[id="valorVenda"]').first();
-    if (await precoField.count() > 0) {
-      await precoField.fill('0,00');
-    }
+    const precoField = scope.locator('input[name="preco"], input[id="preco"], input[name="valorVenda"], input[id="valorVenda"], input[name="preco_venda"]').last();
+    if (await precoField.count() > 0) await precoField.fill('0,00');
 
     // Categoria: escolhe primeira opção não-vazia se select obrigatório
-    const catSelect = page.locator('select[name="categoria"], select[id="categoria"], select[name="categoriaProduto"]').first();
+    const catSelect = scope.locator('select[name="categoria"], select[id="categoria"], select[name="categoriaProduto"]').last();
     if (await catSelect.count() > 0) {
       const opts = await catSelect.locator('option').allInnerTexts();
       const firstReal = opts.findIndex((t) => t.trim() && !/selecione|escolha/i.test(t));
       if (firstReal > 0) await catSelect.selectOption({ index: firstReal });
     }
 
-    // Unidade Comercial
-    const uncomSelect = page.locator('select[name="uncom"], select[id="uncom"], select[name="unidadeComercial"]').first();
+    // Unidade Comercial — default "Unidade"
+    const uncomSelect = scope.locator('select[name="uncom"], select[id="uncom"], select[name="unidadeComercial"], select.uncom').last();
     if (await uncomSelect.count() > 0) {
       await uncomSelect.selectOption({ label: 'Unidade' }).catch(() => undefined);
     }
 
     await page.screenshot({ path: `${OUT_DIR}/cad-${slug}-03-filled.png`, fullPage: true });
 
-    // Submit
-    const salvarBtn = page.locator('button:has-text("Salvar"), input[value="Salvar"], button[type="submit"]').first();
+    // Submit — dentro do modal se aplicável
+    const salvarBtn = scope.locator('button:has-text("Salvar"), input[value="Salvar"], button[type="submit"]').last();
     if (await salvarBtn.count() === 0) {
       return { ok: false, error: 'botão Salvar não encontrado no form de cadastro' };
     }
