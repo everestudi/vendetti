@@ -272,35 +272,47 @@ enum DecisionStatus {
 
 /// Reclamação de cliente da vending machine — tratada pela Lúcia (SAC).
 model Complaint {
-  id            String           @id @default(cuid())
-  receivedAt    DateTime         @default(now())
+  id                 String           @id @default(cuid())
+  receivedAt         DateTime         @default(now())
   /// "zapi", "whatsapp-corporativo", "manual"
-  source        String
-  customerPhone String?
-  customerNote  String           @db.Text
+  source             String
+  customerPhone      String?
+  customerNote       String           @db.Text
   /// Slot reportado pelo cliente (ex: "13").
-  slotPosition  String?
+  slotPosition       String?
   /// URL de comprovante (foto/print enviada pelo cliente).
-  proofUrl      String?
+  proofUrl           String?
   /// Match com Transaction no Vendpago (se Lúcia conseguir cruzar).
-  transactionId String?
-  status        ComplaintStatus  @default(RECEIVED)
-  resolution    String?          @db.Text
-  resolvedAt    DateTime?
-  refundAmount  Decimal?         @db.Decimal(10, 2)
-  escalatedAt   DateTime?
+  transactionId      String?
+  /// Resultado do cruzamento: true se achou venda do slot+horário no banco
+  transactionMatched Boolean?
+  status             ComplaintStatus  @default(RECEIVED)
+  resolution         String?          @db.Text
+  resolvedAt         DateTime?
+  refundAmount       Decimal?         @db.Decimal(10, 2)
+  escalatedAt        DateTime?
+  /// Contador de mensagens enviadas pela Lúcia. Max 4 antes de silenciar.
+  luciaMessageCount  Int              @default(0)
+  /// Último timestamp de msg do cliente — usado pra detectar abandono (>2h).
+  lastClientMessageAt DateTime?
   /// Conversa completa em jsonl
-  conversation  Json?
+  conversation       Json?
+
+  @@index([customerPhone, status])
+  @@index([status, lastClientMessageAt])
 }
 
 enum ComplaintStatus {
-  RECEIVED            // chegou inbound, triagem pendente
+  RECEIVED            // chegou inbound, triagem pendente (transitório)
   TRIAGE_REJECTED     // não é SAC válido — silenciado
-  AWAITING_PROOF      // Lúcia pediu comprovante
-  AWAITING_SLOT       // Lúcia pediu slot
+  AWAITING_PROOF      // legado — Lúcia pediu comprovante (migrar pra AWAITING_INFO)
+  AWAITING_SLOT       // legado — Lúcia pediu slot (migrar pra AWAITING_INFO)
+  AWAITING_INFO       // novo: pediu print+slot juntos, esperando
   ESCALATED           // mastigado e enviado pro Luís
+  ASSUMED_BY_LUIS     // Luís assumiu via /assumir, Lúcia muta
   REFUNDED
   DISMISSED
+  ABANDONED           // cliente não respondeu em 2h após escalation
 }
 
 // === Secrets (cifrados em AES-256-GCM com chave derivada de AUTH_SECRET) ===

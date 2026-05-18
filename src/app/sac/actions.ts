@@ -1,29 +1,34 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { prisma } from '@/lib/db';
+import { markAssumedByLuis, markDismissed, markRefunded } from '@/lib/vendetti/lucia';
 
 export async function resolveSacComplaint(formData: FormData) {
   const id = String(formData.get('id') ?? '');
   const refund = parseFloat(String(formData.get('refund') ?? '0'));
-  const resolution = String(formData.get('resolution') ?? '').trim() || null;
   if (!id) return;
-  await prisma.complaint.update({
-    where: { id },
-    data: {
-      status: 'REFUNDED',
-      refundAmount: Number.isFinite(refund) ? refund : null,
-      resolution,
-      resolvedAt: new Date(),
-    },
-  });
+  await markRefunded(id, Number.isFinite(refund) ? refund : undefined);
   revalidatePath('/sac');
+  revalidatePath('/vendetti');
 }
 
 export async function dismissSacComplaint(id: string) {
-  await prisma.complaint.update({
-    where: { id },
-    data: { status: 'DISMISSED', resolvedAt: new Date() },
-  });
+  await markDismissed(id);
   revalidatePath('/sac');
+  revalidatePath('/vendetti');
+}
+
+export async function dismissSacWithReason(formData: FormData) {
+  const id = String(formData.get('id') ?? '');
+  const reason = String(formData.get('reason') ?? '').trim();
+  if (!id) return;
+  await markDismissed(id, reason || undefined);
+  revalidatePath('/sac');
+  revalidatePath('/vendetti');
+}
+
+export async function assumeSacComplaint(id: string) {
+  await markAssumedByLuis(id);
+  revalidatePath('/sac');
+  revalidatePath('/vendetti');
 }

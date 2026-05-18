@@ -1,34 +1,37 @@
 /**
  * Webhook Z-API · recebe mensagens inbound.
  *
- * Z-API envia POST com `{ phone, fromMe, type, text:{message}, image:{imageUrl}, ... }`.
- * Validação por shared secret no header `X-Vendetti-Secret` (configura no Z-API
- * webhook URL → adiciona o header).
+ * Z-API envia POST com `{ phone, fromMe, type, text:{message}, image:{imageUrl},
+ * audio:{audioUrl}, ... }`. Validação por shared secret no header
+ * `X-Vendetti-Secret` ou query `?secret=...`.
  *
  * Roteamento:
- *   - fromMe=true → ignora (foi o Vendetti mesmo)
- *   - admin (Luís) → TODO: rotear pro agent loop (próxima rodada)
- *   - SAC → processa Lúcia
+ *   - fromMe=true / type≠ReceivedCallback → ignora
+ *   - admin (Luís) com imagem → NF-e (Bruno)
+ *   - admin (Luís) com texto → comandos SAC (Lúcia admin)
+ *   - SAC → Lúcia
  *   - silence → loga e ignora
  */
 
 import { NextResponse } from 'next/server';
 import { processLuciaInbound } from '@/lib/vendetti/lucia';
+import { handleAdminCommand } from '@/lib/vendetti/lucia-admin';
 import { handleNfeFromWhatsapp } from '@/lib/vendetti/nfe-from-whatsapp';
+import { transcribeAudio } from '@/lib/zapi/audio-transcribe';
 import { classifyInbound } from '@/lib/zapi/allowlist';
+import { sendText } from '@/lib/zapi/send';
 import { getSecret } from '@/lib/secrets';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
 
 // Circuit breaker em memória: mesma phone só pode disparar processamento 1x a cada 3s.
-// Defesa-em-profundidade caso o filtro `type !== 'ReceivedCallback'` falhe e a Z-API
-// mande envio próprio de volta. Reset por cold start é aceitável (ainda corta surto).
 const lastSeen = new Map<string, number>();
 const COOLDOWN_MS = 3000;
 
 interface ZapiTextMessage { message?: string }
 interface ZapiImageMessage { imageUrl?: string; caption?: string }
+interface ZapiAudioMessage { audioUrl?: string; mimeType?: string }
 interface ZapiPayload {
   phone?: string;
   fromMe?: boolean;
@@ -36,11 +39,11 @@ interface ZapiPayload {
   type?: string;
   text?: ZapiTextMessage;
   image?: ZapiImageMessage;
+  audio?: ZapiAudioMessage;
   messageId?: string;
 }
 
 export async function POST(req: Request) {
-  // Auth opcional: header OU query string (?secret=...) — Z-API não suporta header customizado
   const expected = await getSecret('ZAPI_WEBHOOK_SECRET');
   if (expected) {
     const url = new URL(req.url);
@@ -54,18 +57,12 @@ export async function POST(req: Request) {
 
   const body = (await req.json().catch(() => ({}))) as ZapiPayload;
 
-  // Z-API manda tipos diferentes pro mesmo webhook URL:
-  //   - ReceivedCallback   → mensagem inbound do cliente (único que processamos)
-  //   - MessageStatusCallback / DeliveryCallback / SendMessageCallback → eventos de envio
-  // Se aceitarmos os 2, entramos em loop: cada sendText vira nova "msg" pro webhook.
   if (body.type && body.type !== 'ReceivedCallback') {
     return NextResponse.json({ ok: true, ignored: `type:${body.type}` });
   }
-  // fromMe → silencia (eco da própria msg que mandamos)
   if (body.fromMe === true) {
     return NextResponse.json({ ok: true, ignored: 'fromMe' });
   }
-  // grupos: ignoramos por agora (futuro: Weverton confirmar abastecimento no grupo)
   if (body.isGroup === true) {
     return NextResponse.json({ ok: true, ignored: 'group' });
   }
@@ -82,29 +79,54 @@ export async function POST(req: Request) {
 
   const text = body.text?.message ?? body.image?.caption ?? '';
   const imageUrl = body.image?.imageUrl;
+  const audioUrl = body.audio?.audioUrl;
 
-  // Admin (Luís) + mídia → roteia pra parser de NF-e (Rita).
-  // Sem mídia ainda não temos chat livre de admin → cai pra silence.
-  const klass = await classifyInbound(body.phone, text);
+  // Transcreve áudio se houver (best-effort, falha silenciosa se OPENAI_API_KEY ausente)
+  let audioTranscript: string | undefined;
+  if (audioUrl) {
+    const t = await transcribeAudio(audioUrl);
+    if (t) audioTranscript = t;
+  }
+  const effectiveText = text || audioTranscript || '';
+
+  const klass = await classifyInbound(body.phone, effectiveText);
+
+  // === ADMIN (Luís) ===
   if (klass.tier === 'admin') {
     if (imageUrl) {
+      // Imagem do Luís = NF-e (fluxo Bruno)
       const r = await handleNfeFromWhatsapp(body.phone, imageUrl);
       return NextResponse.json({ route: 'admin-nfe', ...r });
     }
-    return NextResponse.json({ ok: true, route: 'admin-text', ignored: 'admin chat livre não implementado' });
+    if (effectiveText) {
+      const cmd = await handleAdminCommand(effectiveText);
+      if (cmd.handled) {
+        if (cmd.reply) await sendText(body.phone, cmd.reply);
+        return NextResponse.json({ ok: true, route: 'admin-cmd', reply: cmd.reply });
+      }
+      // Texto não-reconhecido — só loga
+      return NextResponse.json({
+        ok: true,
+        route: 'admin-text',
+        ignored: 'comando não reconhecido (use /listar, /assumir, /dispensar, /aprovar)',
+      });
+    }
+    return NextResponse.json({ ok: true, route: 'admin-empty' });
   }
 
+  // === SAC (cliente) ===
   const result = await processLuciaInbound({
     phone: body.phone,
     text,
     imageUrl,
+    audioUrl,
+    audioTranscript,
     messageId: body.messageId,
   });
 
   return NextResponse.json({ ok: true, ...result });
 }
 
-// GET pra healthcheck
 export async function GET() {
   return NextResponse.json({ ok: true, service: 'zapi-webhook' });
 }

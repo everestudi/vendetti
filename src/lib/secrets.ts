@@ -26,6 +26,7 @@ export const KNOWN_SECRETS = [
   { key: 'ATACADAO_PASS', label: 'Atacadão — senha (opcional)', hint: '' },
   { key: 'GITHUB_PAT', label: 'GitHub Personal Access Token', hint: 'Pra disparar workflow Vendtef sync. Scope: repo. github.com/settings/tokens' },
   { key: 'GITHUB_REPO', label: 'GitHub repo (org/name)', hint: 'Padrão: everestudi/vendetti — só sobrescreva se mover o repo' },
+  { key: 'OPENAI_API_KEY', label: 'OpenAI API Key (Whisper)', hint: 'Pra transcrever áudios do WhatsApp. ~$0.006/min. platform.openai.com/api-keys' },
 ] as const;
 
 export type SecretKey = (typeof KNOWN_SECRETS)[number]['key'];
