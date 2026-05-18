@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import { approveDecision, rejectDecision, executeDecisionAction, confirmPhysical } from './actions';
+import { approveDecision, rejectDecision, executeDecisionAction, confirmPhysical, updateDecisionItems } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -112,12 +112,104 @@ function DecisionHeader({ d }: { d: Decision }) {
   );
 }
 
+interface WevertonItem {
+  slotPosition?: string;
+  qty?: number;
+  productGuess?: string;
+  slotProduct?: string | null;
+  matchConfidence?: 'high' | 'mid' | 'low' | 'no-slot';
+  targetProduct?: string;
+  skip?: boolean;
+}
+
 function PendingCard({ d }: { d: Decision }) {
+  const data = (d.data ?? {}) as { source?: string; items?: WevertonItem[] };
+  const isWeverton = d.kind === 'SYSTEM_INVENTORY_SYNC' && data.source === 'weverton-group';
+  const items = isWeverton && Array.isArray(data.items) ? data.items : [];
+
   return (
     <article className="rounded-lg border border-amber-200 bg-amber-50/30 p-4">
       <DecisionHeader d={d} />
       <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
+
+      {/* Editor de items (só pra Decisions Weverton) */}
+      {isWeverton && items.length > 0 && (
+        <form action={updateDecisionItems.bind(null, d.id)} className="mt-4 rounded border border-amber-200 bg-white p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-navy/60">
+              Revisar items ({items.length} slots)
+            </h4>
+            <button
+              type="submit"
+              className="rounded border border-navy/20 px-2 py-0.5 text-[11px] font-medium text-navy hover:bg-navy/5"
+            >
+              💾 Atualizar
+            </button>
+          </div>
+          <p className="mb-3 text-[10px] text-navy/55">
+            ⚠️ Items <strong>low/mid</strong> match podem ser troca de produto. Edite "Produto alvo" se o Weverton trocou (ex: slot 56 com Monster Watermelon). Deixe vazio pra não trocar.
+            Marque "skip" pra pular um slot sem cancelar a Decision inteira.
+          </p>
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px]">
+              <thead>
+                <tr className="border-b border-navy/10 text-left text-navy/50">
+                  <th className="py-1 pr-2">slot</th>
+                  <th className="py-1 pr-2">no Vendtef hoje</th>
+                  <th className="py-1 pr-2">Weverton mandou</th>
+                  <th className="py-1 pr-2">qty</th>
+                  <th className="py-1 pr-2 min-w-[160px]">produto alvo (vazio = sem troca)</th>
+                  <th className="py-1 pr-2">match</th>
+                  <th className="py-1 pr-2">skip</th>
+                </tr>
+              </thead>
+              <tbody>
+                {items.map((it, i) => {
+                  const confidence = it.matchConfidence ?? 'no-slot';
+                  const cls =
+                    confidence === 'high' ? 'bg-emerald-50 text-emerald-700' :
+                    confidence === 'mid' ? 'bg-amber-50 text-amber-700' :
+                    'bg-rose-50 text-rose-700';
+                  const defaultTarget = it.targetProduct ?? (confidence === 'low' ? (it.productGuess ?? '') : '');
+                  return (
+                    <tr key={i} className={`border-b border-navy/5 ${it.skip ? 'opacity-40' : ''}`}>
+                      <td className="py-1 pr-2 font-mono font-semibold text-navy">{it.slotPosition?.padStart(2, '0')}</td>
+                      <td className="py-1 pr-2 text-navy/70">{it.slotProduct ?? '—'}</td>
+                      <td className="py-1 pr-2 text-navy/70">{it.productGuess ?? '?'}</td>
+                      <td className="py-1 pr-2">
+                        <input
+                          type="number"
+                          name={`qty_${i}`}
+                          defaultValue={it.qty}
+                          min={0}
+                          className="w-14 rounded border border-navy/20 px-1 py-0.5 text-right font-mono"
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <input
+                          type="text"
+                          name={`target_${i}`}
+                          defaultValue={defaultTarget}
+                          placeholder={confidence === 'high' ? 'sem troca' : it.productGuess ?? ''}
+                          className="w-full rounded border border-navy/20 px-1 py-0.5"
+                        />
+                      </td>
+                      <td className="py-1 pr-2">
+                        <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${cls}`}>{confidence}</span>
+                      </td>
+                      <td className="py-1 pr-2 text-center">
+                        <input type="checkbox" name={`skip_${i}`} defaultChecked={it.skip} />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </form>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <form action={approveDecision.bind(null, d.id)}>
           <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">

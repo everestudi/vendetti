@@ -31,6 +31,8 @@ interface DecisionItem {
   /** Override manual: nome do produto que deve ficar na seleção. Setado quando
    *  Luís corrige a Decision com `targetProduct` antes de aprovar. */
   targetProduct?: string;
+  /** Marcar pra pular esse item específico (Luís marca em /decisions). */
+  skip?: boolean;
 }
 
 async function loadDecision(decisionId: string) {
@@ -49,6 +51,7 @@ async function buildInputs(items: DecisionItem[]): Promise<AbastecimentoItemInpu
 
   const out: AbastecimentoItemInput[] = [];
   for (const it of items) {
+    if (it.skip) continue; // Luís marcou como skip em /decisions
     const slot = await prisma.slot.findFirst({
       where: { machineId: machine.id, position: it.slotPosition },
       include: { sku: true },

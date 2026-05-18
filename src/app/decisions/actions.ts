@@ -47,3 +47,44 @@ export async function confirmPhysical(id: string) {
   });
   revalidatePath('/decisions');
 }
+
+/**
+ * Atualiza os items de uma Decision Weverton antes de aprovar.
+ * Recebe formData com chaves `qty[i]`, `targetProduct[i]`, `skip[i]` indexed.
+ * O scraper depois lê `data.items` (com os novos valores) ao executar.
+ */
+export async function updateDecisionItems(id: string, formData: FormData) {
+  const dec = await prisma.decision.findUnique({ where: { id } });
+  if (!dec) return;
+  const data = (dec.data ?? {}) as Record<string, unknown>;
+  const items = Array.isArray(data.items) ? (data.items as Array<Record<string, unknown>>) : [];
+
+  const updated = items.map((it, i) => {
+    const qty = formData.get(`qty_${i}`);
+    const targetProduct = formData.get(`target_${i}`);
+    const skip = formData.get(`skip_${i}`) === 'on';
+    return {
+      ...it,
+      qty: qty ? parseInt(String(qty), 10) || (it.qty as number) : it.qty,
+      targetProduct: targetProduct ? String(targetProduct).trim() || undefined : undefined,
+      skip,
+    };
+  });
+
+  // Recalcula totalUnits ignorando skipped
+  const totalUnits = updated.filter((i) => !i.skip).reduce((s, i) => s + (i.qty as number), 0);
+  const activeCount = updated.filter((i) => !i.skip).length;
+
+  await prisma.decision.update({
+    where: { id },
+    data: {
+      data: {
+        ...data,
+        items: updated,
+        totalUnits,
+      } as never,
+      summary: `Reposição Weverton: ${activeCount} slot(s) · ${totalUnits} unidades`,
+    },
+  });
+  revalidatePath('/decisions');
+}
