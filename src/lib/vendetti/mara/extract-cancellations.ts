@@ -44,13 +44,16 @@ export function parseCancellationsCSV(content: string): RawCancellation[] {
   const lines = content.split(/\r?\n/);
   const out: RawCancellation[] = [];
   let inData = false;
+  // Suporta ambos formatos — semicolon-quoted (atual) e /t literal (legacy)
+  const useSemicolon = content.includes('";"');
+  const sep = useSemicolon ? '";"' : '/t';
 
   for (const raw of lines) {
     if (!raw.trim()) continue;
     if (!inData) {
       if (
         raw.includes('"Cliente"') &&
-        (raw.includes('"Nome Máquina"') || raw.includes('"Máquina"')) &&
+        (raw.includes('"Nome Máquina"') || raw.includes('"Máquina"') || raw.includes('"M�quina"')) &&
         raw.includes('"Motivo"')
       ) {
         inData = true;
@@ -58,7 +61,9 @@ export function parseCancellationsCSV(content: string): RawCancellation[] {
       }
       continue;
     }
-    const fields = raw.split('/t').map(stripQuotes);
+    const fields = useSemicolon
+      ? raw.replace(/^"/, '').replace(/"$/, '').split(sep)
+      : raw.split(sep).map(stripQuotes);
     if (fields.length < 9) continue;
 
     // idx 7 tem "DD/MM/YYYY HH:MM:SS" junto

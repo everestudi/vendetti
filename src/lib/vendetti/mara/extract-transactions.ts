@@ -35,11 +35,24 @@ function stripQuotes(s: string): string {
   return s.replace(/^"/, '').replace(/"$/, '').trim();
 }
 
-/** Parser do CSV com separador literal "/t". */
+/**
+ * Parser do CSV.
+ *
+ * Formato atual (verificado em maio/2026): separador `";"` entre fields aspados,
+ * encoding latin1/cp1252 (chars com til/cedilha vêm mojibake). Header tem
+ * 2 linhas: a principal + um sub-header com "Produto"/"Mola" sob "Produtos".
+ *
+ * Antes era separador literal "/t" — mudou em algum momento, deixei suporte
+ * legacy de fallback caso voltem ao formato antigo.
+ */
 export function parseTransactionsCSV(content: string): RawTransaction[] {
   const lines = content.split(/\r?\n/);
   const out: RawTransaction[] = [];
   let inData = false;
+
+  // Detecta separador olhando primeira linha de dados/header
+  const useSemicolon = content.includes('";"');
+  const sep = useSemicolon ? '";"' : '/t';
 
   for (const raw of lines) {
     if (!raw.trim()) continue;
@@ -52,10 +65,22 @@ export function parseTransactionsCSV(content: string): RawTransaction[] {
       continue;
     }
 
-    const fields = raw.split('/t').map(stripQuotes);
+    // Split por separador, remove aspa do início/fim
+    const fields = useSemicolon
+      ? raw
+          .replace(/^"/, '')
+          .replace(/"$/, '')
+          .split(sep)
+      : raw.split(sep).map(stripQuotes);
+
     if (fields.length < 13) continue;
 
-    // estrutura conhecida — 22 colunas
+    // Colunas (verificadas no CSV real, separador ";"):
+    // [0] cliente, [1] maquina, [2] modelo, [3] fabricante, [4] paymentType,
+    // [5] product, [6] slot (mola), [7] venda, [8] unitPrice, [9] totalBR,
+    // [10] cod promocional, [11] dateBR, [12] timeBR, [13] nLogico, [14] nsu,
+    // [15] autorização, [16] tipoCart, [17] rede, [18] cardBrand, [19] usuario,
+    // [20] nCartao, [21] matricula
     out.push({
       cliente: fields[0] ?? '',
       maquina: fields[1] ?? '',
