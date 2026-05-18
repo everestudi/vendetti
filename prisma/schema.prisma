@@ -380,6 +380,21 @@ model Secret {
   updatedBy String?
 }
 
+// === Histórico do chat com o Augusto Vendetti ===
+
+/// Mensagens persistidas do /chat e /vendetti. Por enquanto uma única sessão
+/// global do admin (Luís). Pra multi-user / multi-sessão, basta adicionar
+/// sessionId e indexar.
+model ChatMessage {
+  id        String   @id @default(cuid())
+  role      String   // 'user' | 'assistant' | 'system'
+  /// JSON serializado dos `parts` (text + tool calls + tool results)
+  parts     Json
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
 // === Caixa de ideias (Luís joga, discutimos depois) ===
 
 model Idea {

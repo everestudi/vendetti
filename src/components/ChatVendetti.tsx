@@ -62,10 +62,33 @@ function Message({ role, parts }: { role: 'user' | 'assistant' | 'system'; parts
 
 export function ChatVendetti({ heightClass, hideHeader }: Props) {
   const [input, setInput] = useState('');
-  const { messages, sendMessage, status } = useChat({
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const { messages, setMessages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({ api: '/api/chat' }),
   });
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // Hidrata histórico salvo no banco na primeira montagem
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/chat/history')
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled) return;
+        if (json.ok && Array.isArray(json.messages) && json.messages.length > 0) {
+          // useChat aceita messages com id/role/parts — vamos passar isso direto
+          setMessages(json.messages);
+        }
+        setHistoryLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -90,11 +113,28 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
               {status === 'streaming' ? '✍️ digitando…' : '🟢 online · Opus 4.7'}
             </p>
           </div>
+          <button
+            type="button"
+            onClick={async () => {
+              if (!confirm('Apagar histórico do chat?')) return;
+              await fetch('/api/chat/history?confirm=1', { method: 'DELETE' });
+              setMessages([]);
+            }}
+            className="text-[10px] text-navy/40 hover:text-navy/70"
+            title="Apaga todo o histórico do chat"
+          >
+            ⌫ novo chat
+          </button>
         </header>
       )}
 
       <div className="flex-1 space-y-3 overflow-y-auto py-2">
-        {messages.length === 0 && (
+        {!historyLoaded && (
+          <div className="rounded-lg bg-navy-50/50 p-3 text-xs italic text-navy/50">
+            Carregando histórico…
+          </div>
+        )}
+        {historyLoaded && messages.length === 0 && (
           <div className="rounded-lg bg-navy-50 p-4 text-sm text-navy/65">
             <strong className="text-navy">Pergunta algo:</strong>
             <ul className="mt-2 list-disc pl-5 text-xs">
