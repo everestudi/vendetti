@@ -8,7 +8,9 @@ import { logout } from '@/app/login/actions';
 const TEAM_LINKS: { href: string; label: string; agent: string }[] = [
   { href: '/mara', label: 'Análise · Mara', agent: 'mara' },
   { href: '/bruno', label: 'Compras · Bruno', agent: 'bruno' },
-  { href: '/sac', label: 'SAC · Lúcia', agent: 'lucia' },
+  { href: '/sac', label: 'SAC vending · Lúcia', agent: 'lucia' },
+  { href: '/atendimento', label: 'Atendimento Bluemall · Lúcia', agent: 'lucia' },
+  { href: '/leads', label: 'Leads locação · Lúcia', agent: 'lucia' },
   { href: '/equipe/rita', label: 'Operações · Rita', agent: 'rita' },
   { href: '/equipe/zelda', label: 'Oversight · Zelda', agent: 'zelda' },
 ];

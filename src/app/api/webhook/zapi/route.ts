@@ -16,6 +16,8 @@
 import { NextResponse } from 'next/server';
 import { processLuciaInbound } from '@/lib/vendetti/lucia';
 import { handleAdminCommand } from '@/lib/vendetti/lucia-admin';
+import { handleInquiry } from '@/lib/vendetti/lucia-inquiry';
+import { classifyInquiry, classifyByKeywords } from '@/lib/vendetti/lucia-classify';
 import { handleNfeFromWhatsapp } from '@/lib/vendetti/nfe-from-whatsapp';
 import { transcribeAudio } from '@/lib/zapi/audio-transcribe';
 import { classifyInbound } from '@/lib/zapi/allowlist';
@@ -114,17 +116,38 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: true, route: 'admin-empty' });
   }
 
-  // === SAC (cliente) ===
-  const result = await processLuciaInbound({
+  // === Cliente (não-admin) ===
+  // Classifica via LLM (Haiku 4.5) — fallback keywords se falhar
+  const classification =
+    (await classifyInquiry(body.phone, effectiveText)) ?? classifyByKeywords(effectiveText);
+
+  // SAC_VENDING continua na state machine atual (Complaint)
+  if (classification.category === 'SAC_VENDING') {
+    const result = await processLuciaInbound({
+      phone: body.phone,
+      text,
+      imageUrl,
+      audioUrl,
+      audioTranscript,
+      messageId: body.messageId,
+    });
+    return NextResponse.json({ ok: true, category: 'SAC_VENDING', ...result });
+  }
+
+  // SPAM → silencia
+  if (classification.category === 'SPAM') {
+    return NextResponse.json({ ok: true, category: 'SPAM', ignored: 'classified-spam' });
+  }
+
+  // Demais categorias (LEAD_LOCACAO, ESTACIONAMENTO, GERAL) → Inquiry
+  const result = await handleInquiry({
     phone: body.phone,
-    text,
+    classification,
+    text: effectiveText,
     imageUrl,
     audioUrl,
-    audioTranscript,
-    messageId: body.messageId,
   });
-
-  return NextResponse.json({ ok: true, ...result });
+  return NextResponse.json({ ok: true, category: classification.category, ...result });
 }
 
 export async function GET() {

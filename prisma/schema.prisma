@@ -315,6 +315,62 @@ enum ComplaintStatus {
   ABANDONED           // cliente não respondeu em 2h após escalation
 }
 
+/// Inquiry · guarda-chuva pra qualquer mensagem que não é SAC_VENDING.
+/// Locação de loja, estacionamento, dúvidas gerais — tudo passa por aqui.
+/// Lúcia classifica via LLM (Haiku 4.5), responde 1x cordialmente e escala
+/// pro Luís com tag de categoria.
+model Inquiry {
+  id              String          @id @default(cuid())
+  receivedAt      DateTime        @default(now())
+  customerPhone   String
+  customerName    String?
+  source          String          @default("zapi")
+  /// Categoria detectada pelo classificador. String aberta pra extensão futura
+  /// (novas categorias sem mexer no schema).
+  category        String
+  /// Resumo curto gerado pelo classificador (max 60 chars).
+  subject         String?
+  originalMessage String          @db.Text
+  conversation    Json?
+  status          InquiryStatus   @default(NEW)
+  assignedTo      String?         // "luis", "lucia", futuro: outros agentes
+  resolution      String?         @db.Text
+  resolvedAt      DateTime?
+  /// Stage do funil (só pra category=LEAD_LOCACAO)
+  leadStage       LeadStage?
+  /// Detalhes flexíveis: tamanho/tipo de loja, valor estimado, etc
+  leadDetails     Json?
+  /// Quantas msgs a Lúcia já mandou (cap 4 igual SAC)
+  luciaMessageCount Int           @default(0)
+  lastClientMessageAt DateTime?
+  updatedAt       DateTime        @updatedAt
+
+  @@index([customerPhone])
+  @@index([category, status])
+  @@index([leadStage, status])
+  @@index([receivedAt])
+}
+
+enum InquiryStatus {
+  NEW             // recém-chegada
+  ACKNOWLEDGED    // Lúcia respondeu o cliente cordialmente
+  ESCALATED       // repassada pro Luís via WhatsApp
+  IN_PROGRESS     // Luís está tratando
+  ASSUMED_BY_LUIS // Luís assumiu, Lúcia muta
+  RESOLVED
+  DISMISSED
+  ABANDONED
+}
+
+enum LeadStage {
+  PRE_QUALIFICACAO  // chegou, sem detalhes
+  QUALIFICADO       // tem informações básicas (tipo, tamanho, prazo)
+  EM_NEGOCIACAO
+  PROPOSTA_ENVIADA
+  CONVERTIDO
+  PERDIDO
+}
+
 // === Secrets (cifrados em AES-256-GCM com chave derivada de AUTH_SECRET) ===
 
 model Secret {
