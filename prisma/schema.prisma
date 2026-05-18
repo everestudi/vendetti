@@ -416,6 +416,7 @@ model WorkerRun {
   @@index([status, startedAt])
 }
 
+
 // === Caixa de ideias (Luís joga, discutimos depois) ===
 
 model Idea {

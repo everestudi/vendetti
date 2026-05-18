@@ -24,6 +24,8 @@ import { transcribeAudio } from '@/lib/zapi/audio-transcribe';
 import { classifyInbound } from '@/lib/zapi/allowlist';
 import { sendText } from '@/lib/zapi/send';
 import { getSecret } from '@/lib/secrets';
+import { prisma } from '@/lib/db';
+import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
 export const maxDuration = 30;
@@ -52,6 +54,37 @@ function normalize(phone: string): string {
   return phone.replace(/\D/g, '');
 }
 
+/**
+ * Grava o hit no WorkerRun pra ficar visível em /webhooks.
+ * status=OK; route+meta contam a história completa. Não bloqueia o response.
+ */
+async function logHit(payload: ZapiPayload | null, route: string, result: unknown): Promise<void> {
+  try {
+    await prisma.workerRun.create({
+      data: {
+        name: 'webhook_zapi',
+        status: 'OK',
+        finishedAt: new Date(),
+        meta: {
+          route,
+          phone: payload?.phone ?? null,
+          participantPhone: payload?.participantPhone ?? null,
+          isGroup: payload?.isGroup === true,
+          fromMe: payload?.fromMe === true,
+          type: payload?.type ?? null,
+          text: (payload?.text?.message ?? payload?.image?.caption ?? '').slice(0, 500),
+          hasImage: Boolean(payload?.image?.imageUrl),
+          hasAudio: Boolean(payload?.audio?.audioUrl),
+          payloadKeys: payload ? Object.keys(payload) : [],
+          result,
+        } as unknown as Prisma.InputJsonValue,
+      },
+    });
+  } catch (e) {
+    console.warn('[webhook log]', e instanceof Error ? e.message : e);
+  }
+}
+
 export async function POST(req: Request) {
   const expected = await getSecret('ZAPI_WEBHOOK_SECRET');
   if (expected) {
@@ -60,6 +93,7 @@ export async function POST(req: Request) {
     const fromQuery = url.searchParams.get('secret');
     const provided = fromHeader ?? fromQuery;
     if (provided !== expected) {
+      await logHit(null, 'rejected:unauthorized', { status: 401 });
       return NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 });
     }
   }
@@ -67,13 +101,19 @@ export async function POST(req: Request) {
   const body = (await req.json().catch(() => ({}))) as ZapiPayload;
 
   if (body.type && body.type !== 'ReceivedCallback') {
-    return NextResponse.json({ ok: true, ignored: `type:${body.type}` });
+    const result = { ok: true, ignored: `type:${body.type}` };
+    await logHit(body, `ignored:type:${body.type}`, result);
+    return NextResponse.json(result);
   }
   if (body.fromMe === true) {
-    return NextResponse.json({ ok: true, ignored: 'fromMe' });
+    const result = { ok: true, ignored: 'fromMe' };
+    await logHit(body, 'ignored:fromMe', result);
+    return NextResponse.json(result);
   }
   if (!body.phone) {
-    return NextResponse.json({ ok: false, error: 'phone ausente' }, { status: 400 });
+    const result = { ok: false, error: 'phone ausente' };
+    await logHit(body, 'rejected:no-phone', result);
+    return NextResponse.json(result, { status: 400 });
   }
 
   // === MENSAGEM DE GRUPO ===
@@ -93,14 +133,28 @@ export async function POST(req: Request) {
       const text = body.text?.message ?? body.image?.caption ?? '';
       if (text.trim()) {
         const r = await handleWevertonGroupMessage(text, body.messageId);
-        return NextResponse.json({ route: 'weverton-restock', ...r });
+        const result = { route: 'weverton-restock', ...r };
+        await logHit(body, 'weverton-restock', result);
+        return NextResponse.json(result);
       }
     }
-    return NextResponse.json({
+    const result = {
       ok: true,
       ignored: 'group',
       detail: isOpGroup ? 'op group but not from Weverton/Luís' : 'other group',
-    });
+      diag: {
+        isOpGroup: Boolean(isOpGroup),
+        fromKnownOperator: Boolean(fromKnownOperator),
+        // mostra parcial pra diagnostico sem vazar
+        body_phone_tail: body.phone?.slice(-8) ?? null,
+        op_id_tail: opGroupId?.slice(-8) ?? null,
+        participant_tail: body.participantPhone?.slice(-8) ?? null,
+        luis_tail: luisPhone?.slice(-8) ?? null,
+        weverton_tail: wevertonPhone?.slice(-8) ?? null,
+      },
+    };
+    await logHit(body, `ignored:group:${isOpGroup ? 'wrong-operator' : 'other-group'}`, result);
+    return NextResponse.json(result);
   }
 
   const now = Date.now();
