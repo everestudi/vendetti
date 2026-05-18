@@ -79,32 +79,57 @@ async function downloadChunk(
   ctx: BrowserContext,
   start: Date,
   end: Date,
+  debugLabel = '',
 ): Promise<RawTransaction[]> {
   const page = await ctx.newPage();
   try {
     await page.goto(URL, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle').catch(() => undefined);
     await dismissModals(page);
+    mkdirSync(TMP, { recursive: true });
+    await page.screenshot({ path: `${TMP}/dbg-${debugLabel}-01-form.png`, fullPage: true }).catch(() => undefined);
 
-    // jQuery UI datepicker — usa API
-    await page.evaluate(
-      ({ s, e }) => {
+    const fmtBR = (d: Date) =>
+      `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`;
+    const startBR = fmtBR(start);
+    const endBR = fmtBR(end);
+
+    // Datepicker: setDate via jQuery + fallback de fill direto
+    const setDateOk = await page.evaluate(
+      ({ s, e, sStr, eStr }) => {
         // @ts-expect-error jQuery global na página
         const $ = window.jQuery ?? window.$;
-        if (typeof $ !== 'function') return;
-        $('#inicio').datepicker('setDate', new Date(s));
-        $('#fim').datepicker('setDate', new Date(e));
+        if (typeof $ === 'function') {
+          try {
+            $('#inicio').datepicker('setDate', new Date(s));
+            $('#fim').datepicker('setDate', new Date(e));
+            // Dispara change event
+            $('#inicio').trigger('change');
+            $('#fim').trigger('change');
+            return { jq: true, inicio: $('#inicio').val(), fim: $('#fim').val() };
+          } catch (err) {
+            return { jq: false, err: String(err) };
+          }
+        }
+        // Fallback: input direto
+        const inicio = document.querySelector<HTMLInputElement>('#inicio');
+        const fim = document.querySelector<HTMLInputElement>('#fim');
+        if (inicio) inicio.value = sStr;
+        if (fim) fim.value = eStr;
+        return { jq: false, inicio: inicio?.value, fim: fim?.value };
       },
-      { s: start.toISOString(), e: end.toISOString() },
+      { s: start.toISOString(), e: end.toISOString(), sStr: startBR, eStr: endBR },
     );
-    await page.waitForTimeout(300);
+    console.warn(`     [dbg ${debugLabel}] datepicker: ${JSON.stringify(setDateOk)}`);
+    await page.waitForTimeout(500);
 
     // Etapa 1: Continuar → gera relatório no servidor
     await page
       .locator('button:has-text("Continuar"), input[type="submit"][value*="Continuar" i]')
       .first()
       .click({ force: true });
-    await page.waitForTimeout(1_500);
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: `${TMP}/dbg-${debugLabel}-02-after-continuar.png`, fullPage: true }).catch(() => undefined);
 
     // Verifica se houve erro
     const erro = await page
@@ -116,6 +141,7 @@ async function downloadChunk(
       console.warn(`     ⚠️ erro do servidor: ${erro.trim().slice(0, 80)}`);
       return [];
     }
+    if (erro) console.warn(`     [dbg ${debugLabel}] alert: "${erro.trim().slice(0, 80)}"`);
 
     // Etapa 2: aguarda botão Download e clica
     const downloadBtn = page
@@ -124,6 +150,7 @@ async function downloadChunk(
     try {
       await downloadBtn.waitFor({ state: 'visible', timeout: 8_000 });
     } catch {
+      console.warn(`     [dbg ${debugLabel}] download não apareceu — ver dbg-${debugLabel}-02-after-continuar.png`);
       return [];
     }
 
@@ -168,7 +195,7 @@ export async function extractTransactionsLastNMonths(
     console.log(
       `  chunk ${i + 1}/${months}: ${start.toLocaleDateString('pt-BR')} → ${end.toLocaleDateString('pt-BR')}`,
     );
-    const rows = await downloadChunk(ctx, start, end);
+    const rows = await downloadChunk(ctx, start, end, `tx-${i + 1}`);
     console.log(`    + ${rows.length} transações`);
     all.push(...rows);
   }
