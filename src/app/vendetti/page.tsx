@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
+import { getInfraHealth } from '@/lib/infra/health';
 import { CEO, avatarUrl } from '@/lib/agents/team';
 import { ChatVendettiDynamic } from '@/components/ChatVendettiDynamic';
 import { AutoRefresh } from '@/components/AutoRefresh';
@@ -30,7 +31,7 @@ const AGENT_COLOR: Record<string, string> = {
 };
 
 export default async function VendettiPage() {
-  const [pending, approved, awaitingPhysical, complaintsOpen, purchasesPending, transactions, decisionsRecent] =
+  const [pending, approved, awaitingPhysical, complaintsOpen, purchasesPending, transactions, decisionsRecent, infraHealth] =
     await Promise.all([
       prisma.decision.findMany({ where: { status: 'PENDING' }, orderBy: { createdAt: 'desc' } }),
       prisma.decision.findMany({ where: { status: 'APPROVED' }, orderBy: { createdAt: 'desc' } }),
@@ -39,6 +40,7 @@ export default async function VendettiPage() {
       prisma.purchase.count({ where: { vendtefSyncedAt: null } }),
       prisma.transaction.findMany({ orderBy: { occurredAt: 'desc' }, take: 15, include: { sku: true } }),
       prisma.decision.findMany({ orderBy: { createdAt: 'desc' }, take: 10 }),
+      getInfraHealth(),
     ]);
 
   const events: { at: Date; emoji: string; agent: string; summary: string; link?: string }[] = [];
@@ -67,6 +69,18 @@ export default async function VendettiPage() {
     <>
       <AutoRefresh intervalMs={30_000} />
       <main className="mx-auto max-w-4xl px-4 py-8">
+        {/* STALENESS BANNER */}
+        {infraHealth.isStale && (
+          <section className="mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+            <div className="font-semibold">⚠️ Dados velhos detectados</div>
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {infraHealth.reasons.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          </section>
+        )}
+
         {/* HERO */}
         <section className="mb-8 flex flex-col items-start gap-5 rounded-2xl border border-navy/15 bg-gradient-to-br from-navy/[0.03] via-white to-gold/[0.06] p-6 sm:flex-row">
           {/* eslint-disable-next-line @next/next/no-img-element */}

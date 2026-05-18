@@ -20,6 +20,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { prisma } from '../../lib/db';
 import { getSecret } from '../../lib/secrets';
 import { dismissModals } from '../_shared/playwright';
+import { runWithWorkerLog } from '../../lib/infra/health';
 
 const OUT_DIR = './tmp/vendtef-entrada';
 const ERP_HOME = 'https://www.erpvending.com.br/';
@@ -541,7 +542,7 @@ async function main() {
   }
 }
 
-main().catch((err) => {
+runWithWorkerLog('vendtef_entrada', main).catch((err) => {
   console.error(err);
   process.exit(1);
 });

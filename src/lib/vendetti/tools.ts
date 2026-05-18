@@ -22,6 +22,7 @@ import {
 } from './policies';
 import { searchAtacadao } from '../../scrapers/atacadao/search';
 import { sendToOperacaoGroup, sendText } from '../zapi/send';
+import { getFreshness, getInfraHealth } from '../infra/health';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -29,13 +30,14 @@ import { sendToOperacaoGroup, sendText } from '../zapi/send';
 
 export const mara_summary = tool({
   description:
-    'Retorna o sumário operacional atual: snapshot mais recente do estoque (slots OK/alerta/críticos + % capacidade), contagem de SKUs e slots. Use no início de qualquer raciocínio pra entender o estado da máquina.',
+    'Retorna o sumário operacional atual: snapshot mais recente do estoque (slots OK/alerta/críticos + % capacidade), contagem de SKUs e slots. Use no início de qualquer raciocínio pra entender o estado da máquina. RETORNA dataFreshness: SE isStale=true, OS DADOS ESTÃO VELHOS — avise o Luís e considere acionar infra_trigger_backfill.',
   inputSchema: z.object({}),
   execute: async () => {
-    const [snap, slots, skus] = await Promise.all([
+    const [snap, slots, skus, freshness] = await Promise.all([
       getLatestSnapshot(),
       getSlotCount(),
       getSkuCount(),
+      getFreshness('snapshot'),
     ]);
     return {
       snapshot: snap
@@ -50,6 +52,11 @@ export const mara_summary = tool({
         : null,
       slotsInCatalog: slots,
       skusInCatalog: skus,
+      dataFreshness: {
+        lastUpdate: freshness.lastUpdate?.toISOString() ?? null,
+        ageHours: freshness.ageHours,
+        isStale: freshness.isStale,
+      },
     };
   },
 });
@@ -195,28 +202,88 @@ export const mara_cancellations = tool({
 
 export const transactions_recent = tool({
   description:
-    'Lista N transações mais recentes (filtra por status OK / FAILED / REFUNDED / COMPLAINT se fornecido). Inclui produto, slot, valor, hora, motivo de falha se houver. Use pra investigar período específico ou ver as últimas vendas.',
+    'Lista N transações mais recentes (filtra por status OK / FAILED / REFUNDED / COMPLAINT se fornecido). Inclui produto, slot, valor, hora, motivo de falha se houver. Use pra investigar período específico ou ver as últimas vendas. RETORNA dataFreshness — SE isStale, comunique ao Luís.',
   inputSchema: z.object({
     limit: z.number().int().min(1).max(100).default(20),
     status: z.enum(['OK', 'FAILED', 'REFUNDED', 'COMPLAINT']).optional(),
   }),
   execute: async ({ limit, status }) => {
-    const rows = await prisma.transaction.findMany({
-      where: status ? { status } : undefined,
-      orderBy: { occurredAt: 'desc' },
-      take: limit,
-      include: { sku: true },
+    const [rows, freshness] = await Promise.all([
+      prisma.transaction.findMany({
+        where: status ? { status } : undefined,
+        orderBy: { occurredAt: 'desc' },
+        take: limit,
+        include: { sku: true },
+      }),
+      getFreshness('transactions'),
+    ]);
+    return {
+      transactions: rows.map((r) => ({
+        occurredAt: r.occurredAt.toISOString(),
+        product: r.sku?.name ?? null,
+        slotPosition: r.slotPosition,
+        amount: Number(r.grossAmount),
+        paymentType: r.paymentType,
+        status: r.status,
+        failureReason: r.failureReason,
+        failureCategory: r.failureCategory,
+      })),
+      dataFreshness: {
+        lastUpdate: freshness.lastUpdate?.toISOString() ?? null,
+        ageHours: freshness.ageHours,
+        isStale: freshness.isStale,
+      },
+    };
+  },
+});
+
+export const infra_health = tool({
+  description:
+    'CRÍTICO: retorna saúde de todos os pipelines de dados + workers. Sempre cheque no início de uma conversa pra detectar staleness. Se isStale=true, comunique imediatamente ao Luís com os motivos e considere infra_trigger_backfill.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const h = await getInfraHealth();
+    return {
+      isStale: h.isStale,
+      reasons: h.reasons,
+      pipelines: h.pipelines.map((p) => ({
+        ...p,
+        lastUpdate: p.lastUpdate?.toISOString() ?? null,
+      })),
+      workers: h.workers.map((w) => ({
+        ...w,
+        lastRun: w.lastRun?.toISOString() ?? null,
+      })),
+      capturedAt: h.capturedAt.toISOString(),
+    };
+  },
+});
+
+export const infra_trigger_backfill = tool({
+  description:
+    'Cria uma Decision PENDING pedindo backfill de dados (worker ficou stale e perdeu janela). Não executa o backfill diretamente — cria a proposta pro Luís aprovar via /decisions. Use depois de infra_health detectar pipeline parado por mais de 24h.',
+  inputSchema: z.object({
+    worker: z.enum(['mara_sync', 'vendtef_entrada', 'sac_cleanup']).describe('Worker a re-executar'),
+    fromDate: z.string().optional().describe('Data início janela (ISO, ex: 2026-05-14T00:00:00Z). Omite pra "desde último OK".'),
+    toDate: z.string().optional().describe('Data fim janela (ISO). Omite pra "agora".'),
+    reason: z.string().describe('Por que precisa backfill — diagnóstico curto que vai no rationale.'),
+  }),
+  execute: async ({ worker, fromDate, toDate, reason }) => {
+    const dec = await prisma.decision.create({
+      data: {
+        kind: 'SYSTEM_INVENTORY_SYNC',
+        level: 'YELLOW',
+        summary: `Backfill ${worker}: ${fromDate ?? 'último OK'} → ${toDate ?? 'agora'}`,
+        rationale: reason,
+        data: { worker, fromDate, toDate, reason } as unknown as object,
+        status: 'PENDING',
+      },
     });
-    return rows.map((r) => ({
-      occurredAt: r.occurredAt.toISOString(),
-      product: r.sku?.name ?? null,
-      slotPosition: r.slotPosition,
-      amount: Number(r.grossAmount),
-      paymentType: r.paymentType,
-      status: r.status,
-      failureReason: r.failureReason,
-      failureCategory: r.failureCategory,
-    }));
+    return {
+      ok: true,
+      decisionId: dec.id,
+      message: `Decision ${dec.id.slice(-6)} criada. Luís aprova em /decisions.`,
+    };
   },
 });
 
@@ -823,4 +890,6 @@ export const VENDETTI_TOOLS = {
   rita_send_luis,
   decision_create,
   vendetti_propose_slot_change,
+  infra_health,
+  infra_trigger_backfill,
 } as const;

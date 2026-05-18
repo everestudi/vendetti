@@ -7,20 +7,32 @@
 import { extractAll } from './extract';
 import { loadAll } from './load';
 import { getLatestSnapshot, getMarginBuckets } from './analytics';
+import { runWithWorkerLog } from '../../infra/health';
 
 async function main() {
   console.log('🧮 Mara — sync iniciado');
   const t0 = Date.now();
 
-  console.log('\n[1/3] extract — abrindo browser e visitando Vendtef...');
-  const data = await extractAll();
-  console.log(`  ✓ ${data.slots.length} slots · ${data.skus.length} SKUs · ${data.transactions.length} transações · ${data.cancellations.length} cancelamentos · snapshot ${data.snapshot.capacityFilledPct}%`);
+  const result = await runWithWorkerLog('mara_sync', async () => {
+    console.log('\n[1/3] extract — abrindo browser e visitando Vendtef...');
+    const data = await extractAll();
+    console.log(`  ✓ ${data.slots.length} slots · ${data.skus.length} SKUs · ${data.transactions.length} transações · ${data.cancellations.length} cancelamentos · snapshot ${data.snapshot.capacityFilledPct}%`);
 
-  console.log('\n[2/3] load — UPSERT no Postgres...');
-  const r = await loadAll(data);
-  console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · ${r.transactionsCreated} trx OK · ${r.cancellationsCreated} trx FAILED · ${r.transactionsAggregatedDays} dias agregados · snapshot ${r.snapshotId.slice(0, 12)}…`);
+    console.log('\n[2/3] load — UPSERT no Postgres...');
+    const r = await loadAll(data);
+    console.log(`  ✓ ${r.skusUpserted} SKUs · ${r.slotsUpserted} slots · ${r.transactionsCreated} trx OK · ${r.cancellationsCreated} trx FAILED · ${r.transactionsAggregatedDays} dias agregados · snapshot ${r.snapshotId.slice(0, 12)}…`);
+    return {
+      slots: data.slots.length,
+      skus: data.skus.length,
+      transactions: data.transactions.length,
+      cancellations: data.cancellations.length,
+      capacityPct: data.snapshot.capacityFilledPct,
+      loadResult: r,
+    };
+  });
 
   console.log('\n[3/3] analytics — sumário do estado atual...');
+  void result;
   const snap = await getLatestSnapshot();
   if (snap) {
     console.log(`  estoque: ${snap.slotsOk}🟢 / ${snap.slotsAlert}🟡 / ${snap.slotsCritical}🔴 · capacity ${snap.capacityFilledPct}%`);

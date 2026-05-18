@@ -395,6 +395,27 @@ model ChatMessage {
   @@index([createdAt])
 }
 
+// === Infra · saúde dos workers/jobs ===
+
+/// Cada execução de worker/job grava uma entrada aqui. Permite ao Vendetti
+/// detectar staleness por conta própria via tool `infra_health`.
+model WorkerRun {
+  id          String   @id @default(cuid())
+  /// Nome canônico do worker: "mara_sync", "vendtef_entrada", "sac_cleanup", ...
+  name        String
+  startedAt   DateTime @default(now())
+  finishedAt  DateTime?
+  /// "RUNNING" | "OK" | "FAILED"
+  status      String   @default("RUNNING")
+  /// Mensagem de erro / aviso (null se OK)
+  error       String?  @db.Text
+  /// JSON livre: contagem de items processados, IDs afetados, etc
+  meta        Json?
+
+  @@index([name, startedAt])
+  @@index([status, startedAt])
+}
+
 // === Caixa de ideias (Luís joga, discutimos depois) ===
 
 model Idea {
