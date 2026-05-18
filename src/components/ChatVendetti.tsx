@@ -66,7 +66,8 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
   const { messages, setMessages, sendMessage, status } = useChat({
     transport: new DefaultChatTransport({ api: '/api/chat' }),
   });
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const stickToBottomRef = useRef(true);
 
   // Hidrata histórico salvo no banco na primeira montagem
   useEffect(() => {
@@ -90,9 +91,23 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-scroll do CONTAINER (não da página). Só faz stick-to-bottom se o
+  // usuário já estava perto do fim — se ele scrollou pra cima pra ler algo
+  // anterior, não interrompe enquanto o stream tá rolando.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (stickToBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+    }
   }, [messages]);
+
+  function onContainerScroll() {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    const distFromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+    stickToBottomRef.current = distFromBottom < 60; // tolerância de 60px
+  }
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -128,7 +143,11 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
         </header>
       )}
 
-      <div className="flex-1 space-y-3 overflow-y-auto py-2">
+      <div
+        ref={scrollContainerRef}
+        onScroll={onContainerScroll}
+        className="flex-1 min-h-0 space-y-3 overflow-y-auto overscroll-contain py-2"
+      >
         {!historyLoaded && (
           <div className="rounded-lg bg-navy-50/50 p-3 text-xs italic text-navy/50">
             Carregando histórico…
@@ -150,7 +169,6 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
         {messages.map((m) => (
           <Message key={m.id} role={m.role} parts={m.parts} />
         ))}
-        <div ref={bottomRef} />
       </div>
 
       <form onSubmit={submit} className="mt-3 flex gap-2">
