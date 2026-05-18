@@ -77,7 +77,7 @@ export default async function AtendimentoPage() {
           <h1 className="text-3xl font-bold text-navy">Atendimento Bluemall</h1>
           <p className="mt-1 text-sm italic text-navy/65">
             Inquiries gerais classificadas pela Lúcia (estacionamento, dúvidas, etc) ·{' '}
-            <Link href="/leads" className="underline">
+            <Link href="/bluemall/leads" className="underline">
               ver leads de locação →
             </Link>{' '}
             ·{' '}

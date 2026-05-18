@@ -6,7 +6,7 @@ import {
   inquiryRespondAction,
   inquiryAssumeAction,
   inquiryDismissAction,
-} from '@/app/atendimento/actions';
+} from '@/app/bluemall/atendimento/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -67,7 +67,7 @@ export default async function LeadsPage() {
             Funil CRM alimentado pela Lúcia · {leads.length} leads totais · {activeCount} ativos
           </p>
           <p className="mt-1 text-xs text-navy/45">
-            <Link href="/atendimento" className="underline">
+            <Link href="/bluemall/atendimento" className="underline">
               → outros atendimentos
             </Link>
             {' · '}

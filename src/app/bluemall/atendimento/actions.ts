@@ -11,8 +11,8 @@ import {
 
 export async function inquiryResolveAction(id: string) {
   await markInquiryResolved(id);
-  revalidatePath('/atendimento');
-  revalidatePath('/leads');
+  revalidatePath('/bluemall/atendimento');
+  revalidatePath('/bluemall/leads');
   revalidatePath('/vendetti');
 }
 
@@ -21,15 +21,15 @@ export async function inquiryDismissAction(formData: FormData) {
   const reason = String(formData.get('reason') ?? '').trim();
   if (!id) return;
   await markInquiryDismissed(id, reason || undefined);
-  revalidatePath('/atendimento');
-  revalidatePath('/leads');
+  revalidatePath('/bluemall/atendimento');
+  revalidatePath('/bluemall/leads');
   revalidatePath('/vendetti');
 }
 
 export async function inquiryAssumeAction(id: string) {
   await markInquiryAssumed(id);
-  revalidatePath('/atendimento');
-  revalidatePath('/leads');
+  revalidatePath('/bluemall/atendimento');
+  revalidatePath('/bluemall/leads');
   revalidatePath('/vendetti');
 }
 
@@ -38,8 +38,8 @@ export async function inquiryRespondAction(formData: FormData) {
   const text = String(formData.get('text') ?? '').trim();
   if (!id || !text) return;
   await sendLuisResponse(id, text);
-  revalidatePath('/atendimento');
-  revalidatePath('/leads');
+  revalidatePath('/bluemall/atendimento');
+  revalidatePath('/bluemall/leads');
   revalidatePath('/vendetti');
 }
 
@@ -56,6 +56,6 @@ export async function inquirySetStageAction(
     | 'PERDIDO';
   if (!id || !stage) return;
   await setLeadStage(id, stage);
-  revalidatePath('/leads');
+  revalidatePath('/bluemall/leads');
   revalidatePath('/vendetti');
 }

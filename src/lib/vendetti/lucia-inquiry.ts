@@ -166,7 +166,7 @@ async function escalateToLuis(inquiryId: string) {
   if (!i) return;
 
   const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
-  const linkPath = i.category === 'LEAD_LOCACAO' ? '/leads' : '/atendimento';
+  const linkPath = i.category === 'LEAD_LOCACAO' ? '/bluemall/leads' : '/bluemall/atendimento';
 
   // Histórico desse cliente (outras inquiries)
   const history = await prisma.inquiry.count({
