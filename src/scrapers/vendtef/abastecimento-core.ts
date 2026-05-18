@@ -42,6 +42,13 @@ export interface AbastecimentoItemInput {
   targetProductName?: string;
   /** O que está cadastrado HOJE na seleção (do banco, pra detectar swap). */
   currentSlotProduct?: string | null;
+  /** Dados pra cadastrar produto novo no Vendtef (custo, categoria). Se ausente,
+   *  scraper usa defaults (custo 0, primeira categoria). */
+  newProductData?: {
+    cost?: number;
+    category?: string;
+    supplier?: string;
+  };
 }
 
 export interface AbastecimentoItemResult {
@@ -221,8 +228,15 @@ async function openAbastecimento(page: Page): Promise<AbastSlot[]> {
 /**
  * Cadastra produto novo no ERP. Returns ok+vendtefId se conseguiu, ok=false+error se falhou.
  * (Reaproveita lógica de entrada-estoque.ts mas standalone aqui pra evitar coupling.)
+ *
+ * `newProductData` permite passar custo/categoria reais (Luís preencheu em /decisions).
+ * Sem isso, usa defaults: custo 0, primeira categoria do dropdown.
  */
-async function cadastrarProduto(ctx: BrowserContext, productName: string): Promise<{ ok: boolean; error?: string }> {
+async function cadastrarProduto(
+  ctx: BrowserContext,
+  productName: string,
+  newProductData?: { cost?: number; category?: string },
+): Promise<{ ok: boolean; error?: string }> {
   const page = await ctx.newPage();
   page.setDefaultTimeout(30_000);
   const slug = productName.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 30);
@@ -272,13 +286,27 @@ async function cadastrarProduto(ctx: BrowserContext, productName: string): Promi
     if ((await nomeField.count()) === 0) return { ok: false, error: 'campo nome não achado' };
     await nomeField.fill(productName);
 
-    // Custo zero (Luís ajusta depois — só queremos cadastrar)
-    await page.locator('#preco').fill('0,00').catch(() => undefined);
+    // Custo: usa o que Luís preencheu, senão 0
+    const cost = newProductData?.cost ?? 0;
+    await page.locator('#preco').fill(cost.toFixed(2).replace('.', ',')).catch(() => undefined);
 
-    // Categoria: primeira válida
+    // Categoria: usa o que Luís preencheu (match no select), senão primeira válida
     const catOpts = await page.locator('#categoria option').allInnerTexts();
-    const firstRealCat = catOpts.findIndex((t) => t.trim() && !/selecione|escolha/i.test(t));
-    if (firstRealCat > 0) await page.locator('#categoria').selectOption({ index: firstRealCat });
+    if (newProductData?.category) {
+      const target = newProductData.category.toLowerCase();
+      const matchIdx = catOpts.findIndex((t) => t.toLowerCase().includes(target));
+      if (matchIdx >= 0) {
+        await page.locator('#categoria').selectOption({ index: matchIdx });
+      } else {
+        // Fallback: primeira categoria válida
+        const firstRealCat = catOpts.findIndex((t) => t.trim() && !/selecione|escolha/i.test(t));
+        if (firstRealCat > 0) await page.locator('#categoria').selectOption({ index: firstRealCat });
+        console.log(`    ⚠ categoria "${newProductData.category}" não bate com nenhuma do Vendtef · usando primeira`);
+      }
+    } else {
+      const firstRealCat = catOpts.findIndex((t) => t.trim() && !/selecione|escolha/i.test(t));
+      if (firstRealCat > 0) await page.locator('#categoria').selectOption({ index: firstRealCat });
+    }
 
     await page.locator('#tipo_estoque').selectOption({ label: 'Unidade' }).catch(() => undefined);
 
@@ -506,8 +534,8 @@ export async function runAbastecimento(items: AbastecimentoItemInput[]): Promise
       for (const { it, idx } of swapTargets) {
         const target = it.targetProductName!;
         console.log(`  · slot ${it.slotPosition}: "${it.currentSlotProduct}" → "${target}"`);
-        // Cadastra antes (se já existe, retorna ok)
-        const cad = await cadastrarProduto(ctx, target);
+        // Cadastra antes (se já existe, retorna ok). Passa custo/categoria se Luís preencheu.
+        const cad = await cadastrarProduto(ctx, target, it.newProductData);
         if (!cad.ok) {
           results[idx] = {
             ...results[idx],

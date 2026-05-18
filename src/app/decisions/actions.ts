@@ -61,13 +61,27 @@ export async function updateDecisionItems(id: string, formData: FormData) {
 
   const updated = items.map((it, i) => {
     const qty = formData.get(`qty_${i}`);
-    const targetProduct = formData.get(`target_${i}`);
+    const targetProductRaw = formData.get(`target_${i}`);
+    const targetProduct = targetProductRaw ? String(targetProductRaw).trim() : '';
     const skip = formData.get(`skip_${i}`) === 'on';
+    // newProductData só faz sentido quando há targetProduct
+    const newCostRaw = formData.get(`new_cost_${i}`);
+    const newCategoryRaw = formData.get(`new_category_${i}`);
+    const newSupplierRaw = formData.get(`new_supplier_${i}`);
+    let newProductData: Record<string, unknown> | undefined;
+    if (targetProduct && (newCostRaw || newCategoryRaw)) {
+      newProductData = {
+        cost: newCostRaw ? parseFloat(String(newCostRaw).replace(',', '.')) || 0 : undefined,
+        category: newCategoryRaw ? String(newCategoryRaw).trim() : undefined,
+        supplier: newSupplierRaw ? String(newSupplierRaw) : 'ATACADAO',
+      };
+    }
     return {
       ...it,
       qty: qty ? parseInt(String(qty), 10) || (it.qty as number) : it.qty,
-      targetProduct: targetProduct ? String(targetProduct).trim() || undefined : undefined,
+      targetProduct: targetProduct || undefined,
       skip,
+      newProductData,
     };
   });
 

@@ -33,6 +33,13 @@ interface DecisionItem {
   targetProduct?: string;
   /** Marcar pra pular esse item específico (Luís marca em /decisions). */
   skip?: boolean;
+  /** Dados pra cadastrar produto NOVO no Vendtef (custo, categoria, fornecedor).
+   *  Preenchido pelo Luís na UI quando o targetProduct não tá no catálogo. */
+  newProductData?: {
+    cost?: number;
+    category?: string;
+    supplier?: 'ATACADAO' | 'VITTAL' | 'OUTRO';
+  };
 }
 
 async function loadDecision(decisionId: string) {
@@ -76,6 +83,7 @@ async function buildInputs(items: DecisionItem[]): Promise<AbastecimentoItemInpu
       qty: it.qty,
       targetProductName,
       currentSlotProduct,
+      newProductData: it.newProductData,
     });
   }
   return out;

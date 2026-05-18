@@ -35,13 +35,17 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
     const headerMatch = /^\(?(\d{1,3})\)?\s*[-:]?\s*(.+)$/.exec(line);
     if (!headerMatch) continue;
     const slotPosition = headerMatch[1];
-    const productGuess = headerMatch[2].trim();
+    let productGuess = headerMatch[2].trim();
     if (productGuess.length < 3) continue;
     // skip se é "Boa tarde DD/MM" ou "Reposição"
     if (/^(boa\s+(tarde|noite|dia)|reposi|bom\s+dia)/i.test(productGuess)) continue;
 
+    // Lookahead: linhas adicionais ANTES de "N unidades" são parte do nome
+    // do produto (ex: Weverton manda "(56) Monster Energy\nUltra Watermelon\n5 unidades").
+    // Captura múltiplas linhas até achar a linha de qty.
     let qty = 0;
-    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+    let advanced = 0;
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
       const ln = lines[j];
       if (!ln) continue;
       const qtyMatch = /^(\d+)\s*(?:un|unid|unidad)/i.exec(ln);
@@ -49,9 +53,15 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
         qty = parseInt(qtyMatch[1], 10);
         break;
       }
+      // Outra linha de slot (próximo item) → para
       if (/^\(?\d/.test(ln)) break;
+      // Linha não-qty e não-slot = parte do nome do produto
+      productGuess += ' ' + ln;
+      advanced++;
+      if (advanced > 3) break; // limite de segurança
     }
     if (qty === 0) continue;
+    productGuess = productGuess.trim().replace(/\s+/g, ' ');
 
     let slotProduct: string | null = null;
     let matchConfidence: ParsedItem['matchConfidence'] = 'no-slot';
