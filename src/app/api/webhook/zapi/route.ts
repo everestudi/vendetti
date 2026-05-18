@@ -80,24 +80,26 @@ export async function POST(req: Request) {
   if (body.isGroup === true) {
     const opGroupId = await getSecret('OPERACAO_GROUP_ID');
     const wevertonPhone = await getSecret('WEVERTON_PHONE');
-    const fromWeverton =
-      body.participantPhone &&
-      wevertonPhone &&
-      normalize(body.participantPhone) === normalize(wevertonPhone);
+    const luisPhone = await getSecret('LUIS_PHONE');
     const isOpGroup = opGroupId && body.phone && normalize(body.phone) === normalize(opGroupId);
+    // Aceita Weverton (oficial) OU Luís (pra testar/simular). O handler interno
+    // filtra por padrão de texto — só processa se parece reposição.
+    const fromKnownOperator =
+      body.participantPhone &&
+      ((wevertonPhone && normalize(body.participantPhone) === normalize(wevertonPhone)) ||
+        (luisPhone && normalize(body.participantPhone) === normalize(luisPhone)));
 
-    if (isOpGroup && fromWeverton) {
+    if (isOpGroup && fromKnownOperator) {
       const text = body.text?.message ?? body.image?.caption ?? '';
       if (text.trim()) {
         const r = await handleWevertonGroupMessage(text, body.messageId);
         return NextResponse.json({ route: 'weverton-restock', ...r });
       }
     }
-    // Outros grupos / outros participantes — ignora
     return NextResponse.json({
       ok: true,
       ignored: 'group',
-      detail: isOpGroup ? 'op group but not from Weverton' : 'other group',
+      detail: isOpGroup ? 'op group but not from Weverton/Luís' : 'other group',
     });
   }
 
