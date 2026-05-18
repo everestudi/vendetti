@@ -1,5 +1,5 @@
 import { listSecretStatus } from '@/lib/secrets';
-import { saveSecret } from './actions';
+import { saveSecret, generateAndSaveSecret } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,19 +25,32 @@ export default async function SettingsPage() {
               </div>
               <StatusPill source={s.source} />
             </div>
-            <form action={saveSecret} className="flex gap-2">
-              <input type="hidden" name="key" value={s.key} />
-              <input
-                type="password"
-                name="value"
-                placeholder={s.source === 'missing' ? 'cole o valor aqui' : 'substituir valor atual'}
-                className="flex-1 rounded border border-navy/20 px-3 py-2 text-base"
-                autoComplete="off"
-              />
-              <button type="submit" className="rounded bg-gold px-4 py-2 font-semibold text-navy-900">
-                Salvar
-              </button>
-            </form>
+            <div className="flex flex-wrap gap-2">
+              <form action={saveSecret} className="flex flex-1 min-w-0 gap-2">
+                <input type="hidden" name="key" value={s.key} />
+                <input
+                  type="password"
+                  name="value"
+                  placeholder={s.source === 'missing' ? 'cole o valor aqui' : 'substituir valor atual'}
+                  className="flex-1 min-w-0 rounded border border-navy/20 px-3 py-2 text-base"
+                  autoComplete="off"
+                />
+                <button type="submit" className="rounded bg-gold px-4 py-2 font-semibold text-navy-900">
+                  Salvar
+                </button>
+              </form>
+              {'generatable' in s && s.generatable && (
+                <form action={generateAndSaveSecret.bind(null, s.key)}>
+                  <button
+                    type="submit"
+                    title="Gera um token aleatório (32 bytes base64url) e salva direto"
+                    className="rounded border border-navy/25 px-3 py-2 text-sm font-medium text-navy hover:bg-navy/5"
+                  >
+                    🔐 Gerar
+                  </button>
+                </form>
+              )}
+            </div>
             {s.updatedAt && (
               <div className="mt-2 text-xs text-navy/40">
                 Atualizado em {new Date(s.updatedAt).toLocaleString('pt-BR')}

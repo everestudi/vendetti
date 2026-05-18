@@ -8,7 +8,9 @@
 import { prisma } from './db';
 import { decrypt, encrypt } from './crypto';
 
-/** Lista de secrets que o app espera. Usado pela UI /settings. */
+/** Lista de secrets que o app espera. Usado pela UI /settings.
+ * `generatable=true` mostra botão "Gerar" no /settings — pra tokens aleatórios
+ * que o app gera sozinho (não vêm de provedor externo). */
 export const KNOWN_SECRETS = [
   { key: 'ANTHROPIC_API_KEY', label: 'Anthropic API Key', hint: 'console.anthropic.com → Settings → API Keys' },
   { key: 'RESEND_API_KEY', label: 'Resend API Key', hint: 'resend.com/api-keys' },
@@ -20,14 +22,14 @@ export const KNOWN_SECRETS = [
   { key: 'WEVERTON_PHONE', label: 'WhatsApp do Weverton', hint: '+5534999999999 (com código país)' },
   { key: 'LUIS_PHONE', label: 'WhatsApp do Luís (allow contact)', hint: 'Único canal Z-API que pode falar livre com o agente' },
   { key: 'OPERACAO_GROUP_ID', label: 'ID do grupo "Operação TCN Vending Machine"', hint: 'Formato: 1203...@g.us — descubra com npm run zapi:list-groups' },
-  { key: 'CRON_SECRET', label: 'CRON_SECRET (Bearer token pro cron)', hint: 'Gere com: openssl rand -base64 32' },
-  { key: 'ZAPI_WEBHOOK_SECRET', label: 'Z-API webhook · shared secret', hint: 'Adicione no header X-Vendetti-Secret na config webhook do Z-API' },
+  { key: 'CRON_SECRET', label: 'CRON_SECRET (Bearer token pro cron)', hint: 'Token aleatório usado pelo Vercel Cron pra autenticar. Clica Gerar.', generatable: true },
+  { key: 'ZAPI_WEBHOOK_SECRET', label: 'Z-API webhook · shared secret', hint: 'Token aleatório que valida calls do Z-API. Clica Gerar e cole na URL do webhook como ?secret=...', generatable: true },
   { key: 'ATACADAO_USER', label: 'Atacadão — usuário (opcional)', hint: 'só se precisar logar p/ ver preço' },
   { key: 'ATACADAO_PASS', label: 'Atacadão — senha (opcional)', hint: '' },
   { key: 'GITHUB_PAT', label: 'GitHub Personal Access Token', hint: 'Pra disparar workflow Vendtef sync. Scope: repo. github.com/settings/tokens' },
   { key: 'GITHUB_REPO', label: 'GitHub repo (org/name)', hint: 'Padrão: everestudi/vendetti — só sobrescreva se mover o repo' },
   { key: 'OPENAI_API_KEY', label: 'OpenAI API Key (Whisper)', hint: 'Pra transcrever áudios do WhatsApp. ~$0.006/min. platform.openai.com/api-keys' },
-  { key: 'INQUIRIES_API_KEY', label: 'API Key — endpoint /api/inquiries', hint: 'Bearer token pro Portal Bluemall (outro projeto) consumir leads/atendimento. Gere com: openssl rand -base64 32' },
+  { key: 'INQUIRIES_API_KEY', label: 'API Key — endpoint /api/inquiries', hint: 'Bearer token pro Portal Bluemall (outro projeto) consumir leads/atendimento. Clica Gerar.', generatable: true },
 ] as const;
 
 export type SecretKey = (typeof KNOWN_SECRETS)[number]['key'];
