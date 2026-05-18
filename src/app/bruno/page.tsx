@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
+import { AgentTerminal } from '@/components/AgentTerminal';
 
 export const dynamic = 'force-dynamic';
 
@@ -207,6 +208,8 @@ export default async function BrunoPage() {
           </ul>
         )}
       </section>
+
+      <AgentTerminal scope="bruno" agentLabel="Bruno · Compras" />
     </main>
   );
 }

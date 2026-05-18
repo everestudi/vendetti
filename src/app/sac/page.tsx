@@ -5,6 +5,7 @@ import {
   assumeSacComplaint,
 } from './actions';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
+import { AgentTerminal } from '@/components/AgentTerminal';
 
 export const dynamic = 'force-dynamic';
 
@@ -203,6 +204,8 @@ export default async function SacPage() {
           <code className="rounded bg-white px-1.5 py-0.5">#abc123</code>.
         </p>
       </details>
+
+      <AgentTerminal scope="lucia" agentLabel="Lúcia · SAC + Inquiries" />
     </main>
   );
 }

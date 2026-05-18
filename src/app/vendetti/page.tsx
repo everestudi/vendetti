@@ -4,6 +4,7 @@ import { getInfraHealth } from '@/lib/infra/health';
 import { CEO, avatarUrl } from '@/lib/agents/team';
 import { ChatVendettiDynamic } from '@/components/ChatVendettiDynamic';
 import { AutoRefresh } from '@/components/AutoRefresh';
+import { AgentTerminal } from '@/components/AgentTerminal';
 import {
   approveDecision,
   rejectDecision,
@@ -190,6 +191,8 @@ export default async function VendettiPage() {
             </ul>
           )}
         </section>
+
+        <AgentTerminal scope="vendetti" agentLabel="Augusto · CEO" />
       </main>
     </>
   );

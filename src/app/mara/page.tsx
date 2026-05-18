@@ -4,6 +4,7 @@ import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { getProductMeta } from '@/lib/products/icons';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
 import { RevenueChart } from '@/components/RevenueChart';
+import { AgentTerminal } from '@/components/AgentTerminal';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,6 +162,8 @@ export default async function MaraDashboard({ searchParams }: { searchParams: Pr
           </p>
         </section>
       )}
+
+      <AgentTerminal scope="mara" agentLabel="Mara · Análise" />
     </main>
   );
 }

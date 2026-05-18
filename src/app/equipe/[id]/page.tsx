@@ -4,6 +4,8 @@ import { TEAM, avatarUrl, type Agent } from '@/lib/agents/team';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
+import { AgentTerminal } from '@/components/AgentTerminal';
+import type { AgentScope } from '@/lib/agent-log';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +34,16 @@ const COLOR_TEXT: Record<Agent['color'], string> = {
   rose: 'text-rose-700',
   amber: 'text-amber-700',
   sky: 'text-sky-700',
+};
+
+/// Mapa agent.id → scope do agent-log. Nem todo agente tem feed direto (ainda).
+const AGENT_SCOPE: Record<string, AgentScope | undefined> = {
+  vendetti: 'vendetti',
+  mara: 'mara',
+  bruno: 'bruno',
+  lucia: 'lucia',
+  rita: 'rita',
+  zelda: 'zelda',
 };
 
 export default async function AgentPage({ params }: { params: Promise<{ id: string }> }) {
@@ -141,6 +153,11 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
             slotsTotal={ritaData.total}
           />
         </section>
+      )}
+
+      {/* Terminal — log de eventos do agente */}
+      {AGENT_SCOPE[agent.id] && (
+        <AgentTerminal scope={AGENT_SCOPE[agent.id]!} agentLabel={`${agent.name} · ${agent.role.split('·')[0].trim()}`} />
       )}
 
       {/* Hierarquia */}
