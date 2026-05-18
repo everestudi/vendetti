@@ -24,7 +24,27 @@ export async function executeDecision(decisionId: string, executor = 'admin'): P
     return { ok: false, newStatus: d.status, message: `Status deve ser APPROVED, está ${d.status}` };
   }
 
-  const data = (d.data as { selecao?: string; changes?: { capacity?: number; price?: number } }) ?? {};
+  // Reposição do Weverton (SYSTEM_INVENTORY_SYNC com source=weverton-group)
+  const dataRaw = (d.data ?? {}) as Record<string, unknown>;
+  if (d.kind === 'SYSTEM_INVENTORY_SYNC' && dataRaw.source === 'weverton-group') {
+    const { executeWevertonRestock } = await import('./weverton-restock');
+    const r = await executeWevertonRestock(decisionId);
+    await prisma.decision.update({
+      where: { id: decisionId },
+      data: {
+        status: r.ok ? 'EXECUTED' : 'FAILED',
+        executedAt: r.ok ? new Date() : null,
+        approvedBy: executor,
+      },
+    });
+    return {
+      ok: r.ok,
+      newStatus: r.ok ? 'EXECUTED' : 'FAILED',
+      message: r.message,
+    };
+  }
+
+  const data = dataRaw as { selecao?: string; changes?: { capacity?: number; price?: number } };
   const selecao = data.selecao;
   const changes = data.changes ?? {};
 

@@ -19,6 +19,7 @@ import { handleAdminCommand } from '@/lib/vendetti/lucia-admin';
 import { handleInquiry } from '@/lib/vendetti/lucia-inquiry';
 import { classifyInquiry, classifyByKeywords } from '@/lib/vendetti/lucia-classify';
 import { handleNfeFromWhatsapp } from '@/lib/vendetti/nfe-from-whatsapp';
+import { handleWevertonGroupMessage } from '@/lib/vendetti/weverton-restock';
 import { transcribeAudio } from '@/lib/zapi/audio-transcribe';
 import { classifyInbound } from '@/lib/zapi/allowlist';
 import { sendText } from '@/lib/zapi/send';
@@ -36,6 +37,8 @@ interface ZapiImageMessage { imageUrl?: string; caption?: string }
 interface ZapiAudioMessage { audioUrl?: string; mimeType?: string }
 interface ZapiPayload {
   phone?: string;
+  /// Em msg de grupo: telefone real do remetente (Weverton, Luís, etc)
+  participantPhone?: string;
   fromMe?: boolean;
   isGroup?: boolean;
   type?: string;
@@ -43,6 +46,10 @@ interface ZapiPayload {
   image?: ZapiImageMessage;
   audio?: ZapiAudioMessage;
   messageId?: string;
+}
+
+function normalize(phone: string): string {
+  return phone.replace(/\D/g, '');
 }
 
 export async function POST(req: Request) {
@@ -65,11 +72,33 @@ export async function POST(req: Request) {
   if (body.fromMe === true) {
     return NextResponse.json({ ok: true, ignored: 'fromMe' });
   }
-  if (body.isGroup === true) {
-    return NextResponse.json({ ok: true, ignored: 'group' });
-  }
   if (!body.phone) {
     return NextResponse.json({ ok: false, error: 'phone ausente' }, { status: 400 });
+  }
+
+  // === MENSAGEM DE GRUPO ===
+  if (body.isGroup === true) {
+    const opGroupId = await getSecret('OPERACAO_GROUP_ID');
+    const wevertonPhone = await getSecret('WEVERTON_PHONE');
+    const fromWeverton =
+      body.participantPhone &&
+      wevertonPhone &&
+      normalize(body.participantPhone) === normalize(wevertonPhone);
+    const isOpGroup = opGroupId && body.phone && normalize(body.phone) === normalize(opGroupId);
+
+    if (isOpGroup && fromWeverton) {
+      const text = body.text?.message ?? body.image?.caption ?? '';
+      if (text.trim()) {
+        const r = await handleWevertonGroupMessage(text, body.messageId);
+        return NextResponse.json({ route: 'weverton-restock', ...r });
+      }
+    }
+    // Outros grupos / outros participantes — ignora
+    return NextResponse.json({
+      ok: true,
+      ignored: 'group',
+      detail: isOpGroup ? 'op group but not from Weverton' : 'other group',
+    });
   }
 
   const now = Date.now();
