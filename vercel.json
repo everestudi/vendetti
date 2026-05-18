@@ -5,6 +5,6 @@
   "installCommand": "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm install",
   "regions": ["gru1"],
   "crons": [
-    { "path": "/api/cron/sac-cleanup", "schedule": "0 * * * *" }
+    { "path": "/api/cron/sac-cleanup", "schedule": "0 12 * * *" }
   ]
 }
