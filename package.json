@@ -25,7 +25,9 @@
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts",
     "vendtef:entrada": "dotenv -e .env.local -- tsx src/scrapers/vendtef/entrada-estoque.ts",
-    "vendtef:entrada-ci": "tsx src/scrapers/vendtef/entrada-estoque.ts"
+    "vendtef:entrada-ci": "tsx src/scrapers/vendtef/entrada-estoque.ts",
+    "vendtef:abastecimento": "dotenv -e .env.local -- tsx src/scrapers/vendtef/abastecimento.ts",
+    "vendtef:abastecimento-ci": "tsx src/scrapers/vendtef/abastecimento.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.79",

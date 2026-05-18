@@ -142,20 +142,41 @@ function PendingCard({ d }: { d: Decision }) {
 }
 
 function ApprovedCard({ d }: { d: Decision }) {
+  const data = (d.data ?? {}) as { source?: string; dispatchedAt?: string };
+  const isAsync = d.kind === 'SYSTEM_INVENTORY_SYNC' && data.source === 'weverton-group';
+  const dispatched = isAsync && Boolean(data.dispatchedAt);
+  const dispatchedAge = dispatched
+    ? Math.round((Date.now() - new Date(data.dispatchedAt!).getTime()) / 1000)
+    : null;
+
   return (
     <article className="rounded-lg border border-blue-200 bg-blue-50/30 p-4">
       <DecisionHeader d={d} />
       <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
-      <p className="mt-2 text-[11px] text-blue-900/70">
-        ℹ Clicar "Executar" dispara o scraper agora (browser headless, ~30-60s). Aguarde o load completar.
-      </p>
+      {dispatched ? (
+        <p className="mt-2 text-[11px] text-blue-900/80">
+          🤖 Scraper rodando em GitHub Actions há {dispatchedAge}s. Quando terminar, status muda pra EXECUTED e o
+          grupo Operação é notificado (~3-5min). Pode fechar essa aba.
+        </p>
+      ) : isAsync ? (
+        <p className="mt-2 text-[11px] text-blue-900/70">
+          ℹ Clicar "Executar" dispara o scraper em GitHub Actions (~3-5min). Você recebe notificação no WhatsApp
+          quando terminar.
+        </p>
+      ) : (
+        <p className="mt-2 text-[11px] text-blue-900/70">
+          ℹ Clicar "Executar" dispara o scraper agora (browser headless, ~30-60s). Aguarde o load completar.
+        </p>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
-        <form action={executeDecisionAction.bind(null, d.id)}>
-          <button className="rounded bg-navy px-4 py-1.5 text-sm font-semibold text-white hover:bg-navy-900">
-            🚀 Executar
-          </button>
-        </form>
+        {!dispatched && (
+          <form action={executeDecisionAction.bind(null, d.id)}>
+            <button className="rounded bg-navy px-4 py-1.5 text-sm font-semibold text-white hover:bg-navy-900">
+              🚀 Executar
+            </button>
+          </form>
+        )}
         <form action={rejectDecision} className="flex items-center gap-2">
           <input type="hidden" name="id" value={d.id} />
           <input type="hidden" name="reason" value="rejeitada após aprovação" />

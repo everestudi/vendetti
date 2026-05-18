@@ -14,6 +14,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../db';
 import { sendText } from '../zapi/send';
 import { getSecret } from '../secrets';
+import { dispatchWorkflow } from '../infra/gh-dispatch';
 
 export interface ParsedItem {
   slotPosition: string;
@@ -157,56 +158,74 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
 }
 
 /**
- * Executor da Decision RESTOCK aprovada: dispara GH Action que atualiza
- * estoque no Vendtef + responde no grupo. Chamada pelo executor de decisions.
+ * Executor da Decision RESTOCK aprovada · dispara GH Action que:
+ *   1. Loga no ERP Vendtef
+ *   2. (Se necessário) cadastra produto novo + troca seleção
+ *   3. Lança Operação de Estoque > Abastecimento no estoque da máquina
+ *   4. Atualiza local DB (Reposicao + ReposicaoItem + Slot.currentQty)
+ *   5. Notifica grupo Operação ao terminar
+ *
+ * Como o scraper roda em CI (Vercel Hobby não roda Playwright), aqui só:
+ *   - valida a Decision
+ *   - dispara workflow GH com decision_id
+ *   - avisa Luís que tá rolando
+ *
+ * O scraper marca Decision=EXECUTED/FAILED quando termina.
  */
 export async function executeWevertonRestock(decisionId: string): Promise<{ ok: boolean; message: string }> {
   const dec = await prisma.decision.findUnique({ where: { id: decisionId } });
   if (!dec) return { ok: false, message: 'Decision não encontrada' };
-  const data = (dec.data ?? {}) as { items?: ParsedItem[]; totalUnits?: number };
+  const data = (dec.data ?? {}) as { items?: ParsedItem[]; totalUnits?: number; dispatchedAt?: string };
   if (!data.items?.length) return { ok: false, message: 'sem items na Decision' };
-
-  // Cria Reposicao no DB (audit)
   const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
-  if (!machine) return { ok: false, message: 'máquina não encontrada' };
+  if (!machine) return { ok: false, message: 'máquina BlueMall Rondon não cadastrada' };
 
-  const reposicao = await prisma.reposicao.create({
+  // Guard idempotência: se já foi dispatchado nos últimos 10min, não re-dispara
+  if (data.dispatchedAt) {
+    const elapsed = Date.now() - new Date(data.dispatchedAt).getTime();
+    if (elapsed < 10 * 60 * 1000) {
+      return {
+        ok: true,
+        message: `já dispatchado há ${Math.round(elapsed / 1000)}s — aguarde scraper terminar (~3-5min)`,
+      };
+    }
+  }
+
+  // Dispara GH Action — scraper faz tudo (Vendtef + DB + grupo)
+  const disp = await dispatchWorkflow('vendtef-abastecimento', {
+    decision_id: decisionId,
+    triggered_by: 'vendetti-executor',
+  });
+  if (!disp.ok) {
+    return {
+      ok: false,
+      message: `falha ao disparar GH Action: ${disp.error}. Cheque GITHUB_PAT em /settings.`,
+    };
+  }
+
+  // Marca data.dispatched pra timeline
+  await prisma.decision.update({
+    where: { id: decisionId },
     data: {
-      reportedBy: 'weverton',
-      source: 'WHATSAPP_AUGUSTO',
-      notes: `Decision ${decisionId.slice(-6)} aprovada`,
+      data: {
+        ...(dec.data as Record<string, unknown>),
+        dispatchedAt: new Date().toISOString(),
+      } as unknown as Prisma.InputJsonValue,
     },
   });
 
-  const itemsToSync: { slotPosition: string; qty: number }[] = [];
-  for (const it of data.items) {
-    const slot = await prisma.slot.findFirst({
-      where: { machineId: machine.id, position: it.slotPosition },
-      include: { sku: true },
-    });
-    if (!slot?.skuId) continue;
-    const newQty = Math.min(slot.currentQty + it.qty, slot.capacity);
-    await prisma.reposicaoItem.create({
-      data: {
-        reposicaoId: reposicao.id,
-        skuId: slot.skuId,
-        slotPosition: it.slotPosition,
-        qty: it.qty,
-      },
-    });
-    await prisma.slot.update({ where: { id: slot.id }, data: { currentQty: newQty } });
-    itemsToSync.push({ slotPosition: it.slotPosition, qty: it.qty });
+  // Avisa Luís no privado pra ele saber que tá rolando
+  const luisPhone = await getSecret('LUIS_PHONE');
+  const totalUnits = data.items.reduce((s, i) => s + i.qty, 0);
+  if (luisPhone) {
+    const msg = `🤖 Iniciando abastecimento Vendtef · ${data.items.length} slot(s), ${totalUnits} unidades (Decision ${decisionId.slice(-6)}). Aviso aqui quando terminar (~3-5min).`;
+    await sendText(luisPhone, msg).catch((e) => console.warn('[weverton execute] notify Luís:', e));
   }
 
-  // Dispara GH Action pra atualizar Vendtef (operação de estoque) + responde no grupo
-  // ao terminar. Por enquanto, só atualiza local + responde no grupo.
-  const groupId = await getSecret('OPERACAO_GROUP_ID');
-  if (groupId) {
-    const msg = `✓ Reposição registrada: ${itemsToSync.length} slots, ${itemsToSync.reduce((s, i) => s + i.qty, 0)} unidades. Sistema atualizado.`;
-    await sendText(groupId, msg).catch((e) => console.warn('[weverton execute] grupo:', e));
-  }
-
-  return { ok: true, message: `${itemsToSync.length} slots atualizados` };
+  return {
+    ok: true,
+    message: `GH Action disparado · scraper roda em ~3-5min · resultado vai aparecer no grupo Operação`,
+  };
 }
 
 export async function persistWevertonConversation(messageId: string | undefined, text: string) {

@@ -25,21 +25,28 @@ export async function executeDecision(decisionId: string, executor = 'admin'): P
   }
 
   // Reposição do Weverton (SYSTEM_INVENTORY_SYNC com source=weverton-group)
+  // Dispatcheia GH Action — scraper marca EXECUTED/FAILED quando termina.
+  // Status fica APPROVED até lá; UI mostra "rodando".
   const dataRaw = (d.data ?? {}) as Record<string, unknown>;
   if (d.kind === 'SYSTEM_INVENTORY_SYNC' && dataRaw.source === 'weverton-group') {
     const { executeWevertonRestock } = await import('./weverton-restock');
     const r = await executeWevertonRestock(decisionId);
+    if (!r.ok) {
+      // Dispatch falhou — marca FAILED imediato
+      await prisma.decision.update({
+        where: { id: decisionId },
+        data: { status: 'FAILED', approvedBy: executor },
+      });
+      return { ok: false, newStatus: 'FAILED', message: r.message };
+    }
+    // Dispatch ok — Decision continua APPROVED, scraper assume daqui
     await prisma.decision.update({
       where: { id: decisionId },
-      data: {
-        status: r.ok ? 'EXECUTED' : 'FAILED',
-        executedAt: r.ok ? new Date() : null,
-        approvedBy: executor,
-      },
+      data: { approvedBy: executor },
     });
     return {
-      ok: r.ok,
-      newStatus: r.ok ? 'EXECUTED' : 'FAILED',
+      ok: true,
+      newStatus: 'APPROVED', // scraper sobe pra EXECUTED quando terminar
       message: r.message,
     };
   }

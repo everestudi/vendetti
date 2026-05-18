@@ -9,7 +9,11 @@ import { getSecret } from '../secrets';
 
 const DEFAULT_REPO = 'everestudi/vendetti';
 
-export type WorkflowEventType = 'mara-sync' | 'vendtef-sync' | 'sac-cleanup';
+export type WorkflowEventType =
+  | 'mara-sync'
+  | 'vendtef-sync'
+  | 'vendtef-abastecimento'
+  | 'sac-cleanup';
 
 export interface DispatchResult {
   ok: boolean;
