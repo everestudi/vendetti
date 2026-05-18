@@ -2,6 +2,7 @@
  * Mara · UPSERT no Postgres a partir do que o extract trouxe.
  */
 
+import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db';
 import type { ExtractResult } from './extract';
 
@@ -220,45 +221,56 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     aggregatedDays++;
   }
 
-  // 7. Transactions INDIVIDUAIS (OK) — pelo Nº lógico do Vendtef como vendpagoId
-  let trxCreated = 0;
+  // 7. Transactions INDIVIDUAIS (OK) — batch insert por vendpagoId.
+  // Otimização: pre-carrega SKU map por nome + vendpagoIds existentes, depois
+  // monta lote de novos e usa createMany skipDuplicates.
+  const allSkus = await prisma.sku.findMany({ select: { id: true, name: true } });
+  const skuByName = new Map(allSkus.map((s) => [s.name, s.id]));
+
+  // IDs já existentes pra evitar conflito + acelerar (sem N+1 upsert)
+  const existingTrx = new Set(
+    (
+      await prisma.transaction.findMany({
+        select: { vendpagoId: true },
+        where: { vendpagoId: { not: null } },
+      })
+    ).map((t) => t.vendpagoId!),
+  );
+
+  const toCreate: Prisma.TransactionCreateManyInput[] = [];
   for (const t of data.transactions) {
     const [d, m, y] = t.dateBR.split('/').map(Number);
     const [hh, mm, ss] = t.timeBR.split(':').map(Number);
     if (!d || !m || !y) continue;
     const occurredAt = new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0));
 
-    // Match SKU pelo nome (best-effort)
-    let skuId: string | undefined;
-    if (t.product) {
-      const sku = await prisma.sku.findFirst({ where: { name: t.product } });
-      skuId = sku?.id;
-    }
-
     const vendpagoId = t.nsu || `${t.dateBR}-${t.timeBR}-${t.slot}-${t.product}`;
-    try {
-      await prisma.transaction.upsert({
-        where: { vendpagoId },
-        create: {
-          vendpagoId,
-          occurredAt,
-          skuId,
-          slotPosition: t.slot || null,
-          qty: 1,
-          grossAmount: brlToNumber(t.totalBR),
-          paymentType: t.paymentType,
-          status: 'OK',
-        },
-        update: {},
-      });
-      trxCreated++;
-    } catch {
-      /* duplicado ou erro de constraint — ignora */
+    if (existingTrx.has(vendpagoId)) continue;
+    existingTrx.add(vendpagoId); // proteger contra dup dentro do batch
+
+    toCreate.push({
+      vendpagoId,
+      occurredAt,
+      skuId: t.product ? skuByName.get(t.product) ?? null : null,
+      slotPosition: t.slot || null,
+      qty: 1,
+      grossAmount: brlToNumber(t.totalBR),
+      paymentType: t.paymentType,
+      status: 'OK',
+    });
+  }
+
+  let trxCreated = 0;
+  if (toCreate.length > 0) {
+    // createMany em lotes de 500 pra não sobrecarregar conexão
+    for (let i = 0; i < toCreate.length; i += 500) {
+      const slice = toCreate.slice(i, i + 500);
+      const r = await prisma.transaction.createMany({ data: slice, skipDuplicates: true });
+      trxCreated += r.count;
     }
   }
 
   // 8. Cancelamentos como Transactions com status=FAILED + failureReason/Category
-  let canceledCreated = 0;
   function categorize(desc: string): string {
     const d = desc.toLowerCase();
     if (d.includes('usuário cancelou') || d.includes('usuario cancelou')) return 'USER_CANCEL';
@@ -268,38 +280,39 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     if (d.includes('conexão com a máquina') || d.includes('conexao com a maquina')) return 'CONNECTION_LOST';
     return 'OTHER';
   }
+  // Cancellations: usa SKU map já carregado e mesma técnica de batch
+  const toCreateCancel: Prisma.TransactionCreateManyInput[] = [];
   for (const c of data.cancellations) {
     const [d, m, y] = c.dateBR.split('/').map(Number);
     const [hh, mm, ss] = (c.timeBR || '00:00:00').split(':').map(Number);
     if (!d || !m || !y) continue;
     const occurredAt = new Date(Date.UTC(y, m - 1, d, hh || 0, mm || 0, ss || 0));
 
-    let skuId: string | undefined;
-    if (c.product && c.product !== 'Indefinido') {
-      const sku = await prisma.sku.findFirst({ where: { name: c.product } });
-      skuId = sku?.id;
-    }
     const vendpagoId = c.nsu || `cancel-${c.dateBR}-${c.timeBR}-${c.product}`;
-    try {
-      await prisma.transaction.upsert({
-        where: { vendpagoId },
-        create: {
-          vendpagoId,
-          occurredAt,
-          skuId,
-          slotPosition: c.slot || null,
-          qty: 0,
-          grossAmount: brlToNumber(c.totalBR),
-          paymentType: c.paymentType,
-          status: 'FAILED',
-          failureReason: c.description,
-          failureCategory: categorize(c.description),
-        },
-        update: { failureReason: c.description, failureCategory: categorize(c.description) },
+    if (existingTrx.has(vendpagoId)) continue;
+    existingTrx.add(vendpagoId);
+
+    toCreateCancel.push({
+      vendpagoId,
+      occurredAt,
+      skuId: c.product && c.product !== 'Indefinido' ? skuByName.get(c.product) ?? null : null,
+      slotPosition: c.slot || null,
+      qty: 0,
+      grossAmount: brlToNumber(c.totalBR),
+      paymentType: c.paymentType,
+      status: 'FAILED',
+      failureReason: c.description,
+      failureCategory: categorize(c.description),
+    });
+  }
+  let canceledCreated = 0;
+  if (toCreateCancel.length > 0) {
+    for (let i = 0; i < toCreateCancel.length; i += 500) {
+      const r = await prisma.transaction.createMany({
+        data: toCreateCancel.slice(i, i + 500),
+        skipDuplicates: true,
       });
-      canceledCreated++;
-    } catch {
-      /* idem */
+      canceledCreated += r.count;
     }
   }
 
