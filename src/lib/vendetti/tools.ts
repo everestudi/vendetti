@@ -23,6 +23,7 @@ import {
 import { searchAtacadao } from '../../scrapers/atacadao/search';
 import { sendToOperacaoGroup, sendText } from '../zapi/send';
 import { getFreshness, getInfraHealth } from '../infra/health';
+import { dispatchWorkflow } from '../infra/gh-dispatch';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -259,9 +260,30 @@ export const infra_health = tool({
   },
 });
 
+export const mara_force_sync = tool({
+  description:
+    'Força a Mara a rodar AGORA (dispara GH Action mara-sync). Use quando infra_health mostrar pipeline snapshot/transactions stale > 24h. Roda em ~3-5min e atualiza Postgres com extract + load do Vendtef. Não cria Decision — é ação direta. Retorna ok=true se o dispatch foi aceito (a execução continua em background; verifique infra_health depois pra confirmar).',
+  inputSchema: z.object({
+    reason: z
+      .string()
+      .describe('Por que disparou — vai no log pra audit (ex: "snapshot stale há 72h, ingest parado")'),
+  }),
+  execute: async ({ reason }) => {
+    const r = await dispatchWorkflow('mara-sync', { reason, triggeredBy: 'vendetti-agent' });
+    if (!r.ok) {
+      return { ok: false, error: r.error };
+    }
+    return {
+      ok: true,
+      message: 'Mara sync disparada. Roda em ~3-5min via GH Action. Aguarde e chame infra_health pra verificar atualização.',
+      reason,
+    };
+  },
+});
+
 export const infra_trigger_backfill = tool({
   description:
-    'Cria uma Decision PENDING pedindo backfill de dados (worker ficou stale e perdeu janela). Não executa o backfill diretamente — cria a proposta pro Luís aprovar via /decisions. Use depois de infra_health detectar pipeline parado por mais de 24h.',
+    'Cria uma Decision PENDING pedindo backfill de dados de uma janela específica. Use quando precisar re-importar período passado (raro — para sync imediato use mara_force_sync).',
   inputSchema: z.object({
     worker: z.enum(['mara_sync', 'vendtef_entrada', 'sac_cleanup']).describe('Worker a re-executar'),
     fromDate: z.string().optional().describe('Data início janela (ISO, ex: 2026-05-14T00:00:00Z). Omite pra "desde último OK".'),
@@ -891,5 +913,6 @@ export const VENDETTI_TOOLS = {
   decision_create,
   vendetti_propose_slot_change,
   infra_health,
+  mara_force_sync,
   infra_trigger_backfill,
 } as const;

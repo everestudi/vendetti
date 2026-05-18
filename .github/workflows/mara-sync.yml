@@ -1,0 +1,47 @@
+name: Mara sync
+
+# Roda em 3 gatilhos:
+# - workflow_dispatch: manual via GitHub UI ou via API (Augusto chama via mara_force_sync)
+# - repository_dispatch (event_type=mara-sync): Vercel pode disparar pelo /decisions
+# - schedule: diário 04h BRT (07h UTC). Hobby plan permite 1/dia.
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [mara-sync]
+  schedule:
+    - cron: '0 7 * * *' # 04h BRT
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Mara
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/lib/vendetti/mara/run.ts
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mara-sync-${{ github.run_id }}
+          path: tmp/
+          retention-days: 7
+          if-no-files-found: ignore
