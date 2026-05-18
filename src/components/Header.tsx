@@ -29,8 +29,7 @@ export function Header() {
   // Fecha dropdown ao trocar de rota
   useEffect(() => setTeamOpen(false), [pathname]);
 
-  // Login e /bluemall têm layout próprio — esconde o header Vendetti
-  if (pathname === '/login' || pathname.startsWith('/bluemall')) return null;
+  if (pathname === '/login') return null;
 
   const isTeamActive =
     pathname.startsWith('/equipe') ||
@@ -87,13 +86,6 @@ export function Header() {
 
           <Link href="/vendetti" className={navLinkClass(isCeoActive)}>
             Augusto Vendetti
-          </Link>
-
-          <Link
-            href="/bluemall"
-            className="rounded border border-emerald-300/50 px-2.5 py-1 text-sm text-emerald-800 transition-colors hover:bg-emerald-50"
-          >
-            Portal Bluemall ↗
           </Link>
         </nav>
 

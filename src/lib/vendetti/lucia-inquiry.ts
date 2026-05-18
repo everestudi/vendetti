@@ -165,9 +165,6 @@ async function escalateToLuis(inquiryId: string) {
   const i = await prisma.inquiry.findUnique({ where: { id: inquiryId } });
   if (!i) return;
 
-  const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
-  const linkPath = i.category === 'LEAD_LOCACAO' ? '/bluemall/leads' : '/bluemall/atendimento';
-
   // Histórico desse cliente (outras inquiries)
   const history = await prisma.inquiry.count({
     where: { customerPhone: i.customerPhone, id: { not: i.id } },
@@ -209,8 +206,6 @@ async function escalateToLuis(inquiryId: string) {
   if (i.category === 'LEAD_LOCACAO') {
     lines.push(`/qualificar ${i.id.slice(-6)} | /negociar | /converter | /perder`);
   }
-  lines.push('');
-  lines.push(`Painel: ${base}${linkPath}`);
 
   await sendText(luisPhone, lines.join('\n')).catch((e) =>
     console.warn('[lucia-inquiry] escalate:', e),
