@@ -86,7 +86,7 @@ export default async function SacPage() {
           className="rounded-full ring-4 ring-sky-300/40"
         />
         <div className="flex-1">
-          <h1 className="text-3xl font-bold text-navy">SAC · Lúcia</h1>
+          <h1 className="text-3xl font-bold text-navy">SAC Vending · Lúcia</h1>
           <p className="mt-1 text-sm italic text-navy/65">&ldquo;{lucia.tagline}&rdquo;</p>
           <p className="mt-1 text-xs text-navy/45">
             Máximo 4 mensagens por reclamação · escala pro Luís via WhatsApp · cron marca ABANDONED após 2h sem resposta

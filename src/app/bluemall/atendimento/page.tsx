@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
-import { TEAM, avatarUrl } from '@/lib/agents/team';
 import {
   inquiryResolveAction,
   inquiryDismissAction,
@@ -9,8 +8,6 @@ import {
 } from './actions';
 
 export const dynamic = 'force-dynamic';
-
-const lucia = TEAM.find((a) => a.id === 'lucia')!;
 
 const CATEGORY_LABEL: Record<string, { label: string; cls: string; emoji: string }> = {
   LEAD_LOCACAO: { label: 'Locação', cls: 'bg-emerald-100 text-emerald-800', emoji: '🏢' },
@@ -64,28 +61,17 @@ export default async function AtendimentoPage() {
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">
-      <header className="mb-6 flex items-start gap-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={avatarUrl(lucia, 96)}
-          alt="Lúcia"
-          width={72}
-          height={72}
-          className="rounded-full ring-4 ring-sky-300/40"
-        />
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold text-navy">Atendimento Bluemall</h1>
-          <p className="mt-1 text-sm italic text-navy/65">
-            Inquiries gerais classificadas pela Lúcia (estacionamento, dúvidas, etc) ·{' '}
-            <Link href="/bluemall/leads" className="underline">
-              ver leads de locação →
-            </Link>{' '}
-            ·{' '}
-            <Link href="/sac" className="underline">
-              ver SAC vending →
-            </Link>
-          </p>
+      <header className="mb-6">
+        <div className="text-xs font-semibold uppercase tracking-widest text-emerald-700/70">
+          Operação · Visitantes do shopping
         </div>
+        <h1 className="mt-1 text-3xl font-bold text-emerald-900">Atendimento</h1>
+        <p className="mt-1 text-sm text-emerald-900/70">
+          Mensagens sobre estacionamento, dúvidas gerais e outros assuntos do shopping ·{' '}
+          <Link href="/bluemall/leads" className="underline">
+            ver leads de locação →
+          </Link>
+        </p>
       </header>
 
       {open.length > 0 ? (

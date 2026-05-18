@@ -60,8 +60,8 @@ export default async function BluemallHome() {
         </h1>
         <p className="mt-3 max-w-2xl text-lg text-emerald-900/70">
           Gestão do shopping — leads de locação, atendimento aos visitantes,
-          comunicação com lojistas. A Lúcia recebe tudo via WhatsApp, classifica
-          e organiza por aqui.
+          comunicação com lojistas. Mensagens recebidas via WhatsApp são
+          classificadas e organizadas automaticamente por aqui.
         </p>
       </header>
 
@@ -107,7 +107,8 @@ export default async function BluemallHome() {
         </header>
         {leadsAll.length === 0 ? (
           <p className="text-sm italic text-emerald-900/45">
-            Sem leads ainda. Lúcia abre automaticamente quando alguém manda mensagem sobre locação.
+            Sem leads ainda. Mensagens sobre locação que chegam no WhatsApp abrem lead
+            automaticamente aqui.
           </p>
         ) : (
           <ul className="space-y-2">
@@ -139,14 +140,14 @@ export default async function BluemallHome() {
       <section className="mt-8 rounded-xl border border-emerald-200/60 bg-white/50 p-5 text-sm text-emerald-900/75">
         <h2 className="mb-2 font-semibold text-emerald-900">Como funciona</h2>
         <p>
-          Qualquer mensagem que chega no WhatsApp <strong>+55 11 99871-6386</strong> é
-          analisada pela Lúcia (IA). Ela classifica em SAC vending, locação, estacionamento
-          ou dúvida geral, responde cordialmente e te avisa por WhatsApp em seguida — sem
-          insistir, sem prometer nada que dependa de você.
+          Mensagens recebidas no WhatsApp do shopping são analisadas e classificadas em
+          locação, estacionamento, dúvidas gerais ou outros assuntos. O cliente recebe um
+          retorno cordial automático e você é notificado via WhatsApp para tomar a decisão
+          final — sem insistir com o cliente e sem prometer nada que dependa de você.
         </p>
         <p className="mt-2">
-          Aqui no portal, você acompanha o funil de leads e pode responder ao cliente
-          direto da plataforma — a Lúcia envia em seu nome.
+          Aqui no portal você acompanha o funil de leads, atende inquiries e pode responder
+          ao cliente direto da plataforma.
         </p>
       </section>
     </main>

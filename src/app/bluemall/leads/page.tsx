@@ -1,6 +1,5 @@
 import Link from 'next/link';
 import { prisma } from '@/lib/db';
-import { TEAM, avatarUrl } from '@/lib/agents/team';
 import {
   inquirySetStageAction,
   inquiryRespondAction,
@@ -9,8 +8,6 @@ import {
 } from '@/app/bluemall/atendimento/actions';
 
 export const dynamic = 'force-dynamic';
-
-const lucia = TEAM.find((a) => a.id === 'lucia')!;
 
 const STAGES: { key: string; label: string; bg: string; border: string; head: string }[] = [
   { key: 'PRE_QUALIFICACAO', label: '🟡 Pré-qualif.', bg: 'bg-amber-50/40', border: 'border-amber-200', head: 'text-amber-900' },
@@ -52,36 +49,23 @@ export default async function LeadsPage() {
 
   return (
     <main className="mx-auto max-w-7xl px-4 py-8">
-      <header className="mb-6 flex items-start gap-4">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={avatarUrl(lucia, 96)}
-          alt="Lúcia"
-          width={72}
-          height={72}
-          className="rounded-full ring-4 ring-emerald-300/40"
-        />
-        <div className="flex-1">
-          <h1 className="text-3xl font-bold text-navy">Leads · Locação Bluemall</h1>
-          <p className="mt-1 text-sm italic text-navy/65">
-            Funil CRM alimentado pela Lúcia · {leads.length} leads totais · {activeCount} ativos
-          </p>
-          <p className="mt-1 text-xs text-navy/45">
-            <Link href="/bluemall/atendimento" className="underline">
-              → outros atendimentos
-            </Link>
-            {' · '}
-            <Link href="/sac" className="underline">
-              → SAC vending
-            </Link>
-          </p>
+      <header className="mb-6">
+        <div className="text-xs font-semibold uppercase tracking-widest text-emerald-700/70">
+          Comercial · Locação
         </div>
+        <h1 className="mt-1 text-3xl font-bold text-emerald-900">Funil de Leads</h1>
+        <p className="mt-1 text-sm text-emerald-900/70">
+          {leads.length} leads totais · {activeCount} em andamento ·{' '}
+          <Link href="/bluemall/atendimento" className="underline">
+            outros atendimentos →
+          </Link>
+        </p>
       </header>
 
       {leads.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-navy/20 p-12 text-center text-sm text-navy/45">
-          Sem leads ainda. Quando alguém manda mensagem sobre locação no WhatsApp, a Lúcia
-          classifica e abre lead automaticamente aqui.
+        <div className="rounded-lg border border-dashed border-emerald-300 p-12 text-center text-sm text-emerald-900/50">
+          Sem leads ainda. Toda mensagem sobre locação no WhatsApp do shopping aparece
+          aqui automaticamente.
         </div>
       ) : (
         <div className="grid gap-4 lg:grid-cols-3 xl:grid-cols-6">
