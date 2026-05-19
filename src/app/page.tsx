@@ -3,17 +3,28 @@ import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { HomeDashboard } from '@/components/HomeDashboard';
-import { getMonthlyRevenueSeries, getSyncStatus, getPendingByAgent } from '@/lib/dashboard';
+import {
+  getMonthlyRevenueSeries,
+  getSyncStatus,
+  getPendingByAgent,
+  getDailyRevenueComparison,
+  getAugustoCommentary,
+} from '@/lib/dashboard';
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home() {
-  const [snap, slots, revenueSeries, syncStatus, pending] = await Promise.all([
+export default async function Home({ searchParams }: { searchParams: Promise<{ sync?: string; err?: string }> }) {
+  const params = await searchParams;
+  const syncFeedback = params.sync === 'triggered' ? 'triggered' : params.sync === 'failed' ? 'failed' : null;
+
+  const [snap, slots, revenueSeries, syncStatus, pending, dailyComparison, augusto] = await Promise.all([
     getLatestSnapshot(),
     getSlotsWithMargin(),
     getMonthlyRevenueSeries(12),
     getSyncStatus(),
     getPendingByAgent(),
+    getDailyRevenueComparison(),
+    getAugustoCommentary(),
   ]);
 
   const capacityPct = snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : 0;
@@ -43,8 +54,16 @@ export default async function Home() {
         </p>
       </header>
 
-      {/* DASHBOARD OPERACIONAL — KPIs, faturamento, sync, pendências */}
-      <HomeDashboard revenueSeries={revenueSeries} syncStatus={syncStatus} pending={pending} />
+      {/* DASHBOARD OPERACIONAL — 3 seções: Faturamento · Augusto CEO · Pendências */}
+      <HomeDashboard
+        revenueSeries={revenueSeries}
+        dailyComparison={dailyComparison}
+        syncStatus={syncStatus}
+        pending={pending}
+        augusto={augusto}
+        syncFeedback={syncFeedback}
+        syncFeedbackError={params.err}
+      />
 
       {/* MÁQUINA INTERATIVA — visão ao vivo dos slots com badge Everest */}
       <section className="mt-10 rounded-2xl border border-navy/10 bg-gradient-to-br from-navy-50 to-white p-6">

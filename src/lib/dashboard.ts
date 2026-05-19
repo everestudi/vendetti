@@ -7,6 +7,9 @@
 
 import { prisma } from './db';
 import { STALE_THRESHOLDS_H } from './infra/health';
+import Anthropic from '@anthropic-ai/sdk';
+import { getSecret } from './secrets';
+import { getMonthlyRevenueComparison } from './vendetti/mara/analytics';
 
 const brl = (n: number) =>
   Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 });
@@ -17,6 +20,39 @@ export interface MonthlyRevenuePoint {
   label: string; // ex "Mai/26"
   revenue: number;
   txCount: number;
+}
+
+export interface DailyComparisonPoint {
+  day: number; // 1-31
+  weekday: string; // 'seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'
+  thisMonth: number | null;
+  lastMonth: number | null;
+}
+
+/** Faturamento diário do mês atual vs mês anterior, com dia da semana. */
+export async function getDailyRevenueComparison(): Promise<{
+  points: DailyComparisonPoint[];
+  totals: { thisMonth: number; lastMonth: number };
+  monthLabels: { thisMonth: string; lastMonth: string };
+}> {
+  const data = await getMonthlyRevenueComparison();
+  const now = new Date();
+  const points: DailyComparisonPoint[] = data.points.map((p) => {
+    // Weekday do dia do mês atual (assumindo o dia existe no mês atual)
+    const ref = new Date(now.getFullYear(), now.getMonth(), p.day);
+    const weekdayNames = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+    return {
+      day: p.day,
+      weekday: weekdayNames[ref.getDay()],
+      thisMonth: p.thisMonth,
+      lastMonth: p.lastMonth,
+    };
+  });
+  return {
+    points,
+    totals: data.totals,
+    monthLabels: data.monthLabels,
+  };
 }
 
 /** Faturamento dos últimos N meses (incluindo o atual, parcial). */
@@ -211,4 +247,153 @@ export async function getPendingByAgent(): Promise<AgentPending[]> {
   };
 
   return [bruno, lucia, rita, zelda];
+}
+
+export interface AugustoCommentary {
+  text: string;
+  insights: string[];
+  actions: string[];
+  generatedAt: Date;
+  cached: boolean;
+}
+
+const AUGUSTO_SYSTEM_PROMPT = `Você é Augusto Vendetti, CEO da vending machine BlueMall Rondon. Em cada refresh do dashboard, você dá um briefing executivo curto pro Luís (dono) — como um CEO comentando o estado da operação pro investidor.
+
+REGRAS:
+- Tom direto, executivo, BR pt-BR informal mas profissional. Sem cerimônia.
+- Foco em INSIGHTS + AÇÕES, não em descrição do que tá vendo (Luís já vê os números).
+- Máximo 2 parágrafos curtos no "text" (4-6 linhas total).
+- 2-3 insights curtos (1 frase cada). Pattern, anomalia, oportunidade.
+- 2-3 ações concretas pra maximizar lucro/saúde. Não genérico — específicas pros dados que vê.
+
+OUTPUT: APENAS JSON, sem markdown, formato:
+{
+  "text": "<comentário executivo de 2 parágrafos>",
+  "insights": ["<insight 1>", "<insight 2>", "<insight 3>"],
+  "actions": ["<ação 1>", "<ação 2>", "<ação 3>"]
+}`;
+
+/**
+ * Gera commentary CEO do Augusto a cada refresh.
+ * Cache em WorkerRun(name='augusto_commentary') com TTL 5min pra evitar
+ * uma call Haiku por refresh.
+ */
+export async function getAugustoCommentary(): Promise<AugustoCommentary | null> {
+  // Cache lookup
+  const recent = await prisma.workerRun.findFirst({
+    where: { name: 'augusto_commentary', status: 'OK', startedAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
+    orderBy: { startedAt: 'desc' },
+  });
+  if (recent) {
+    const meta = (recent.meta ?? {}) as Record<string, unknown>;
+    if (meta.text) {
+      return {
+        text: String(meta.text),
+        insights: Array.isArray(meta.insights) ? (meta.insights as string[]) : [],
+        actions: Array.isArray(meta.actions) ? (meta.actions as string[]) : [],
+        generatedAt: recent.startedAt,
+        cached: true,
+      };
+    }
+  }
+
+  // Gera novo via Haiku
+  const apiKey = await getSecret('ANTHROPIC_API_KEY');
+  if (!apiKey) return null;
+
+  // Coleta contexto
+  const [revenueSeries, daily, pending, syncStatus, lowMargin, criticalEverest] = await Promise.all([
+    getMonthlyRevenueSeries(6),
+    getDailyRevenueComparison(),
+    getPendingByAgent(),
+    getSyncStatus(),
+    prisma.slot.findMany({
+      where: { skuId: { not: null } },
+      include: { sku: true },
+      take: 100,
+    }).then((slots) =>
+      slots
+        .map((s) => ({
+          slot: s.position,
+          product: s.sku?.name ?? '',
+          price: s.price ? Number(s.price) : 0,
+          marginEst: s.marginEst ? Number(s.marginEst) : 0,
+          marginPct: s.marginEst && s.price ? Math.round((Number(s.marginEst) / Number(s.price)) * 100) : 0,
+        }))
+        .filter((s) => s.marginPct > 0 && s.marginPct < 30)
+        .sort((a, b) => a.marginPct - b.marginPct)
+        .slice(0, 5),
+    ),
+    prisma.everestStock.findMany({
+      where: { qty: 0 },
+      include: { sku: true },
+      take: 10,
+    }).then((rows) => rows.map((r) => r.sku.name)),
+  ]);
+
+  const context = {
+    faturamento: {
+      mes_atual: revenueSeries[revenueSeries.length - 1],
+      mes_anterior: revenueSeries[revenueSeries.length - 2],
+      ultimos_6_meses: revenueSeries,
+    },
+    diario_mes_vs_anterior: {
+      total_mes_atual: daily.totals.thisMonth,
+      total_mes_anterior: daily.totals.lastMonth,
+      pontos_recentes: daily.points.filter((p) => p.thisMonth !== null).slice(-10),
+    },
+    pendencias: pending.map((p) => ({ agente: p.label, count: p.count, level: p.level, resumo: p.summaryLines })),
+    sync: {
+      ultima: syncStatus.lastSnapshotAt,
+      idade_horas: syncStatus.ageHours,
+      stale: syncStatus.isStale,
+    },
+    margens_baixas: lowMargin,
+    everest_zerado: criticalEverest,
+  };
+
+  const anthropic = new Anthropic({ apiKey });
+  try {
+    const msg = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 1024,
+      system: AUGUSTO_SYSTEM_PROMPT,
+      messages: [
+        {
+          role: 'user',
+          content: `Estado da operação agora:\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nDá o briefing CEO. JSON puro.`,
+        },
+      ],
+    });
+
+    const text = msg.content
+      .filter((c) => c.type === 'text')
+      .map((c) => (c as { type: 'text'; text: string }).text)
+      .join('\n')
+      .trim();
+    const cleaned = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    let parsed: { text: string; insights: string[]; actions: string[] };
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      console.warn('[augusto commentary] JSON inválido:', cleaned.slice(0, 200));
+      return null;
+    }
+
+    // Cache em WorkerRun
+    const now = new Date();
+    await prisma.workerRun.create({
+      data: {
+        name: 'augusto_commentary',
+        status: 'OK',
+        finishedAt: now,
+        meta: parsed as never,
+      },
+    }).catch(() => undefined);
+
+    return { ...parsed, generatedAt: now, cached: false };
+  } catch (err) {
+    console.warn('[augusto commentary]', err instanceof Error ? err.message : err);
+    return null;
+  }
 }

@@ -1,49 +1,54 @@
 /**
- * HomeDashboard · KPIs operacionais + faturamento mês-a-mês + status de sync
- * + pendências por agente. Cabeçalho da home pro Luís ver o estado geral
- * num piscar de olhos.
+ * HomeDashboard · 3 seções separadas:
+ *   1. Faturamento (KPIs + gráficos com toggle mês-a-mês / diário)
+ *   2. Augusto Commentary (briefing CEO a cada refresh, cache 5min)
+ *   3. Pendências por agente
+ *
+ * Sem mistura — cada seção tem propósito único.
  */
 
 import Link from 'next/link';
-import { MonthlyRevenuePoint, AgentPending, SyncStatus } from '@/lib/dashboard';
+import { MonthlyRevenuePoint, AgentPending, SyncStatus, DailyComparisonPoint, AugustoCommentary } from '@/lib/dashboard';
 import { forceMaraSync } from '@/app/actions';
+import { RevenueCharts } from './RevenueCharts';
 
 interface Props {
   revenueSeries: MonthlyRevenuePoint[];
+  dailyComparison: { points: DailyComparisonPoint[]; totals: { thisMonth: number; lastMonth: number }; monthLabels: { thisMonth: string; lastMonth: string } };
   syncStatus: SyncStatus;
   pending: AgentPending[];
+  augusto: AugustoCommentary | null;
+  syncFeedback?: 'triggered' | 'failed' | null;
+  syncFeedbackError?: string;
 }
 
 const brl = (n: number) =>
   Number(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 0 });
 
-const LEVEL_CLS: Record<AgentPending['level'], { card: string; badge: string; emoji: string }> = {
-  ok: {
-    card: 'border-emerald-200 bg-emerald-50/40',
-    badge: 'bg-emerald-100 text-emerald-800',
-    emoji: '✓',
-  },
-  warn: {
-    card: 'border-amber-300 bg-amber-50/60',
-    badge: 'bg-amber-100 text-amber-800',
-    emoji: '⚠️',
-  },
-  critical: {
-    card: 'border-rose-300 bg-rose-50/60',
-    badge: 'bg-rose-100 text-rose-800',
-    emoji: '🔴',
-  },
+const LEVEL_CLS: Record<AgentPending['level'], { card: string; badge: string }> = {
+  ok: { card: 'border-emerald-200 bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-800' },
+  warn: { card: 'border-amber-300 bg-amber-50/60', badge: 'bg-amber-100 text-amber-800' },
+  critical: { card: 'border-rose-300 bg-rose-50/60', badge: 'bg-rose-100 text-rose-800' },
 };
 
-export function HomeDashboard({ revenueSeries, syncStatus, pending }: Props) {
-  const currentMonth = revenueSeries[revenueSeries.length - 1];
-  const previousMonth = revenueSeries[revenueSeries.length - 2];
+export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pending, augusto, syncFeedback, syncFeedbackError }: Props) {
+  // Filtra meses com dado (remove os 0 antigos que confundem o gráfico)
+  const seriesWithData = revenueSeries.filter((p) => p.revenue > 0);
+  // Mantém último mês mesmo zerado (mês atual parcial)
+  const lastIdx = revenueSeries.length - 1;
+  if (seriesWithData.length > 0 && seriesWithData[seriesWithData.length - 1] !== revenueSeries[lastIdx]) {
+    seriesWithData.push(revenueSeries[lastIdx]);
+  }
+  const effectiveSeries = seriesWithData.length > 0 ? seriesWithData : revenueSeries.slice(-3);
+
+  const currentMonth = effectiveSeries[effectiveSeries.length - 1];
+  const previousMonth = effectiveSeries[effectiveSeries.length - 2];
   const monthRevenue = currentMonth?.revenue ?? 0;
   const monthTxCount = currentMonth?.txCount ?? 0;
   const previousRevenue = previousMonth?.revenue ?? 0;
   const deltaPct =
     previousRevenue > 0 ? Math.round(((monthRevenue - previousRevenue) / previousRevenue) * 100) : null;
-  const totalRevenue6m = revenueSeries.slice(-6).reduce((s, p) => s + p.revenue, 0);
+  const totalRevenue6m = effectiveSeries.slice(-6).reduce((s, p) => s + p.revenue, 0);
 
   const ageStr = syncStatus.ageHours == null
     ? '—'
@@ -57,52 +62,26 @@ export function HomeDashboard({ revenueSeries, syncStatus, pending }: Props) {
   const criticalCount = pending.filter((p) => p.level === 'critical').length;
 
   return (
-    <section className="mb-10 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
-      <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-xl font-bold text-navy">📊 Dashboard operacional</h2>
-        <span className="text-xs text-navy/55">Estado da operação · atualizado em tempo real</span>
-      </header>
+    <>
+      {/* Feedback do botão sync */}
+      {syncFeedback === 'triggered' && (
+        <div className="mb-4 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-900">
+          🔄 <strong>Sincronização disparada!</strong> Mara tá rodando no GitHub Actions · resultado em 3-5min.
+          Recarregue a página quando quiser conferir.
+          <Link href="/" className="ml-2 text-xs underline">fechar</Link>
+        </div>
+      )}
+      {syncFeedback === 'failed' && (
+        <div className="mb-4 rounded-lg border-2 border-rose-300 bg-rose-50 p-3 text-sm text-rose-900">
+          ❌ <strong>Sync falhou.</strong> {syncFeedbackError ? `Erro: ${syncFeedbackError}` : 'Verifique GITHUB_PAT em /settings.'}
+          <Link href="/" className="ml-2 text-xs underline">fechar</Link>
+        </div>
+      )}
 
-      {/* KPI cards (4 colunas em desktop, 2 em mobile) */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <Kpi
-          label={`Faturamento ${currentMonth?.label ?? ''}`}
-          value={brl(monthRevenue)}
-          sub={
-            deltaPct == null
-              ? `${monthTxCount} vendas`
-              : `${monthTxCount} vendas · ${deltaPct >= 0 ? '+' : ''}${deltaPct}% vs ${previousMonth?.label}`
-          }
-          tone={deltaPct == null ? 'neutral' : deltaPct >= 0 ? 'positive' : 'negative'}
-        />
-        <Kpi
-          label="6 meses"
-          value={brl(totalRevenue6m)}
-          sub={`média ${brl(totalRevenue6m / Math.min(6, revenueSeries.length))}/mês`}
-          tone="neutral"
-        />
-        <Kpi
-          label="Última sincronização"
-          value={ageStr}
-          sub={
-            syncStatus.lastSnapshotAt
-              ? syncStatus.lastSnapshotAt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
-              : 'sem dados'
-          }
-          tone={syncStatus.isStale ? 'negative' : 'positive'}
-        />
-        <Kpi
-          label="Pendências totais"
-          value={String(totalPending)}
-          sub={criticalCount > 0 ? `${criticalCount} crítica(s)` : 'sem urgência'}
-          tone={criticalCount > 0 ? 'negative' : totalPending > 0 ? 'warn' : 'positive'}
-        />
-      </div>
-
-      {/* Faturamento mês-a-mês (barras simples CSS) */}
-      <div className="mt-6 rounded-lg border border-navy/10 bg-navy-50/30 p-4">
-        <div className="mb-2 flex items-baseline justify-between">
-          <h3 className="text-sm font-semibold text-navy">Faturamento últimos {revenueSeries.length} meses</h3>
+      {/* ===== SEÇÃO 1 · FATURAMENTO ===== */}
+      <section className="mb-8 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
+        <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xl font-bold text-navy">💰 Faturamento</h2>
           <form action={forceMaraSync}>
             <button
               type="submit"
@@ -112,19 +91,110 @@ export function HomeDashboard({ revenueSeries, syncStatus, pending }: Props) {
               🔄 Sincronizar agora
             </button>
           </form>
+        </header>
+
+        {/* KPIs faturamento (4 cards) */}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi
+            label={`Mês atual · ${currentMonth?.label ?? ''}`}
+            value={brl(monthRevenue)}
+            sub={
+              deltaPct == null
+                ? `${monthTxCount} vendas`
+                : `${monthTxCount} vendas · ${deltaPct >= 0 ? '+' : ''}${deltaPct}% vs anterior`
+            }
+            tone={deltaPct == null ? 'neutral' : deltaPct >= 0 ? 'positive' : 'negative'}
+          />
+          <Kpi
+            label={`Mês anterior · ${previousMonth?.label ?? ''}`}
+            value={brl(previousRevenue)}
+            sub={previousMonth ? `${previousMonth.txCount} vendas` : '—'}
+            tone="neutral"
+          />
+          <Kpi
+            label="6 meses (média)"
+            value={brl(totalRevenue6m / Math.min(6, effectiveSeries.length))}
+            sub={`total ${brl(totalRevenue6m)}`}
+            tone="neutral"
+          />
+          <Kpi
+            label="Última sincronização"
+            value={ageStr}
+            sub={
+              syncStatus.lastSnapshotAt
+                ? syncStatus.lastSnapshotAt.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
+                : 'sem dados'
+            }
+            tone={syncStatus.isStale ? 'negative' : 'positive'}
+          />
         </div>
-        <RevenueBars points={revenueSeries} />
+
+        {/* Gráficos com toggle (client) */}
+        <RevenueCharts series={effectiveSeries} dailyPoints={dailyComparison.points} monthLabels={dailyComparison.monthLabels} />
+
         {syncStatus.isStale && (
           <p className="mt-2 text-[11px] text-rose-700">
-            ⚠️ Dados podem estar desatualizados (última atualização {ageStr}). Clique "Sincronizar agora" pra
-            disparar a Mara.
+            ⚠️ Dados podem estar desatualizados (última atualização {ageStr}).
           </p>
         )}
-      </div>
+      </section>
 
-      {/* Pendências por departamento */}
-      <div className="mt-6">
-        <h3 className="mb-3 text-sm font-semibold text-navy">Pendências por departamento</h3>
+      {/* ===== SEÇÃO 2 · AUGUSTO CEO COMMENTARY ===== */}
+      {augusto && (
+        <section className="mb-8 rounded-2xl border-2 border-gold/40 bg-gradient-to-br from-gold-50 to-white p-6">
+          <header className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-xl font-bold text-navy">🤖 Augusto · briefing CEO</h2>
+            <span className="text-[11px] text-navy/45">
+              {augusto.cached ? 'cache' : 'gerado'} · {augusto.generatedAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </header>
+          <p className="whitespace-pre-wrap text-sm leading-relaxed text-navy/85">{augusto.text}</p>
+
+          {(augusto.insights.length > 0 || augusto.actions.length > 0) && (
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {augusto.insights.length > 0 && (
+                <div>
+                  <h3 className="mb-1 text-[10px] font-bold uppercase tracking-wider text-navy/55">🔍 Insights</h3>
+                  <ul className="space-y-1 text-xs text-navy/80">
+                    {augusto.insights.map((i, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <span className="text-gold-700">·</span>
+                        <span>{i}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {augusto.actions.length > 0 && (
+                <div>
+                  <h3 className="mb-1 text-[10px] font-bold uppercase tracking-wider text-navy/55">🎯 Ações sugeridas</h3>
+                  <ul className="space-y-1 text-xs text-navy/80">
+                    {augusto.actions.map((a, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <span className="text-emerald-700">→</span>
+                        <span>{a}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+          <p className="mt-3 text-[10px] text-navy/40">
+            Briefing gerado por Claude Haiku · refresh a cada 5min de cache. Quer chat completo?{' '}
+            <Link href="/chat" className="underline hover:text-navy/70">/chat com Augusto →</Link>
+          </p>
+        </section>
+      )}
+
+      {/* ===== SEÇÃO 3 · PENDÊNCIAS POR DEPARTAMENTO ===== */}
+      <section className="mb-8 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
+        <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
+          <h2 className="text-xl font-bold text-navy">📋 Pendências por departamento</h2>
+          <span className="text-xs text-navy/55">
+            {totalPending} totais{criticalCount > 0 ? ` · ${criticalCount} crítica(s)` : ''}
+          </span>
+        </header>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {pending.map((p) => (
             <Link
@@ -147,12 +217,12 @@ export function HomeDashboard({ revenueSeries, syncStatus, pending }: Props) {
                   <li key={i}>{l}</li>
                 ))}
               </ul>
-              <span className="mt-2 text-[10px] text-navy/40 group-hover:text-navy">abrir →</span>
+              <span className="mt-2 text-[10px] text-navy/40">abrir →</span>
             </Link>
           ))}
         </div>
-      </div>
-    </section>
+      </section>
+    </>
   );
 }
 
@@ -176,32 +246,6 @@ function Kpi({ label, value, sub, tone }: KpiProps) {
       <div className="text-[10px] font-medium uppercase tracking-wide opacity-70">{label}</div>
       <div className="mt-1 text-xl font-bold leading-tight">{value}</div>
       {sub && <div className="mt-0.5 text-[11px] opacity-70">{sub}</div>}
-    </div>
-  );
-}
-
-function RevenueBars({ points }: { points: MonthlyRevenuePoint[] }) {
-  const max = Math.max(1, ...points.map((p) => p.revenue));
-  return (
-    <div className="flex h-32 items-end gap-1 sm:gap-2">
-      {points.map((p) => {
-        const heightPct = (p.revenue / max) * 100;
-        const isCurrent = points.indexOf(p) === points.length - 1;
-        return (
-          <div key={`${p.year}-${p.month}`} className="group flex flex-1 flex-col items-center">
-            <div className="relative flex w-full flex-col-reverse">
-              <div
-                className={`w-full rounded-t transition-all hover:opacity-80 ${isCurrent ? 'bg-navy' : 'bg-navy/40'}`}
-                style={{ height: `${Math.max(4, heightPct)}%`, minHeight: '4px' }}
-                title={`${p.label}: ${brl(p.revenue)} (${p.txCount} vendas)`}
-              />
-            </div>
-            <div className={`mt-1 text-[10px] ${isCurrent ? 'font-bold text-navy' : 'text-navy/50'}`}>
-              {p.label}
-            </div>
-          </div>
-        );
-      })}
     </div>
   );
 }
