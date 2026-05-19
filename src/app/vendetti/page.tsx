@@ -243,30 +243,67 @@ function DecisionMeta({ d }: { d: Decision }) {
 }
 
 function PendingCard({ d }: { d: Decision }) {
+  // Decisions Weverton precisam do editor de items completo (custo/categoria/
+  // entrada Everest pra produtos novos) — ele só existe em /decisions.
+  // Aqui em /vendetti, mostra link pra abrir lá.
+  const data = (d.data ?? {}) as Record<string, unknown>;
+  const needsRichEditor =
+    d.kind === 'SYSTEM_INVENTORY_SYNC' && data.source === 'weverton-group';
+
   return (
     <article className="rounded-lg border border-amber-200 bg-amber-50/30 p-4">
       <DecisionMeta d={d} />
       <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
-      <div className="mt-3 flex flex-wrap items-center gap-2">
-        <form action={approveDecision.bind(null, d.id)}>
-          <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
-            ✓ Aprovar
-          </button>
-        </form>
-        <form action={rejectDecision} className="flex items-center gap-2">
-          <input type="hidden" name="id" value={d.id} />
-          <input
-            type="text"
-            name="reason"
-            placeholder="motivo (opcional)"
-            className="rounded border border-navy/20 px-2 py-1 text-xs"
-          />
-          <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
-            ✗ Rejeitar
-          </button>
-        </form>
-      </div>
+
+      {needsRichEditor ? (
+        <div className="mt-3 rounded-lg border border-amber-300 bg-white p-3">
+          <p className="text-xs text-navy/75">
+            ⚠️ Essa Decision tem 12 slots — precisa revisar item por item (qty, troca de produto,
+            cadastro novo). Abre em <strong>/decisions</strong> que tem o editor completo:
+          </p>
+          <div className="mt-2 flex gap-2">
+            <a
+              href="/decisions"
+              className="rounded bg-navy px-3 py-1.5 text-sm font-semibold text-white hover:bg-navy-900"
+            >
+              📝 Revisar items em /decisions →
+            </a>
+            <form action={rejectDecision} className="flex items-center gap-2">
+              <input type="hidden" name="id" value={d.id} />
+              <input
+                type="text"
+                name="reason"
+                placeholder="motivo (opcional)"
+                className="rounded border border-navy/20 px-2 py-1 text-xs"
+              />
+              <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
+                ✗ Rejeitar
+              </button>
+            </form>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <form action={approveDecision.bind(null, d.id)}>
+            <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
+              ✓ Aprovar
+            </button>
+          </form>
+          <form action={rejectDecision} className="flex items-center gap-2">
+            <input type="hidden" name="id" value={d.id} />
+            <input
+              type="text"
+              name="reason"
+              placeholder="motivo (opcional)"
+              className="rounded border border-navy/20 px-2 py-1 text-xs"
+            />
+            <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
+              ✗ Rejeitar
+            </button>
+          </form>
+        </div>
+      )}
     </article>
   );
 }
