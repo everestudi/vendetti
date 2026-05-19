@@ -153,9 +153,45 @@ export async function configurarProdutoNoEstoque(
         console.log(`    ✓ nova page detectada via context: ${targetPage.url()}`);
       } else {
         await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
-        console.log(`    sem aba nova · continua na page atual`);
+        // Espera mais tempo pra Vendtef carregar conteúdo via AJAX
+        await page.waitForTimeout(3_500);
+        console.log(`    sem aba nova · continua na page atual (esperou 3.5s extra)`);
       }
     }
+
+    // Dump completo do que tá na página depois do click: HTML, modais, iframes,
+    // novos elementos. Vai nos ajudar a entender como Vendtef renderiza Produtos
+    // Configurados (modal? iframe? SPA route? AJAX que carrega numa div?)
+    const postClickInspect = await targetPage.evaluate(() => {
+      const modals = Array.from(document.querySelectorAll('.modal, [role="dialog"], .modal-dialog, .ui-dialog'))
+        .filter((m) => (m as HTMLElement).offsetParent !== null)
+        .map((m) => ({
+          id: (m as HTMLElement).id,
+          className: (m as HTMLElement).className.slice(0, 80),
+          title: m.querySelector('.modal-title, .ui-dialog-title')?.textContent?.trim() ?? '',
+          inputs: m.querySelectorAll('input:not([type="hidden"]), select, textarea').length,
+        }));
+      const iframes = Array.from(document.querySelectorAll('iframe')).map((f) => ({
+        src: (f as HTMLIFrameElement).src,
+        id: (f as HTMLElement).id,
+        visible: (f as HTMLElement).offsetParent !== null,
+      }));
+      const tabPanes = Array.from(document.querySelectorAll('.tab-pane.active, [role="tabpanel"]:not([hidden])'))
+        .filter((p) => (p as HTMLElement).offsetParent !== null)
+        .map((p) => ({
+          id: (p as HTMLElement).id,
+          className: (p as HTMLElement).className.slice(0, 80),
+        }));
+      const visibleTables = Array.from(document.querySelectorAll('table'))
+        .filter((t) => (t as HTMLElement).offsetParent !== null)
+        .map((t) => ({
+          id: (t as HTMLElement).id,
+          firstHeader: t.querySelector('thead th')?.textContent?.trim().slice(0, 60) ?? '',
+          rowCount: t.querySelectorAll('tbody tr').length,
+        }));
+      return { modals, iframes, tabPanes, visibleTables, bodyClass: document.body.className, h1: document.querySelector('h1')?.textContent?.trim() ?? '' };
+    });
+    writeFileSync(`${OUT_DIR}/${slug}-02b-post-click.json`, JSON.stringify(postClickInspect, null, 2));
     await targetPage.waitForTimeout(1_500);
     await targetPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
     await dismissModals(targetPage);
