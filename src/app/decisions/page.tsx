@@ -153,6 +153,11 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
       <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
 
+      {/* DEBUG visível pra investigar caso editor não apareça */}
+      <div className="mt-2 rounded bg-blue-50 px-2 py-1 text-[10px] font-mono text-blue-800">
+        debug: kind={d.kind} · source={String(((d.data ?? {}) as Record<string, unknown>).source ?? 'null')} · isWeverton={String(isWeverton)} · itemsLen={items.length} · skusLen={skus.length}
+      </div>
+
       {/* Editor de items (só pra Decisions Weverton) */}
       {isWeverton && items.length > 0 && (
         <form action={updateDecisionItems.bind(null, d.id)} className="mt-4 rounded border border-amber-200 bg-white p-3">
