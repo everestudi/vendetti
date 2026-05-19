@@ -7,6 +7,8 @@ const PUBLIC_PREFIXES = [
   '/api/webhook',
   '/api/cron',
   '/api/inquiries', // auth via Bearer INQUIRIES_API_KEY no próprio endpoint
+  '/api/zelda', // auth via x-service-key (CRON_SECRET) no próprio endpoint
+  '/api/agent-log', // poll de logs no AgentTerminal (já com cookie da UI)
   '/_next',
   '/favicon',
 ];

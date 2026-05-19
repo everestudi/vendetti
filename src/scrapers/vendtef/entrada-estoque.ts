@@ -636,28 +636,41 @@ async function main() {
   // 🤖 Trigger Zelda no fim do scraper. Match_correction events foram gravados
   // ao longo da execução; agora pedimos análise incremental + notify.
   // Faz HTTP call pro endpoint pra rodar no Vercel (scraper está no GH Actions
-  // sem acesso ao ANTHROPIC_API_KEY local).
+  // sem acesso ao ANTHROPIC_API_KEY local). Auth via x-service-key (CRON_SECRET)
+  // pra passar pelo middleware de session.
   const baseUrl = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
-  try {
-    const res = await fetch(`${baseUrl}/api/zelda/audit-matcher?incremental=1`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    });
-    if (res.ok) {
-      const json = (await res.json()) as { findings?: unknown[]; correctionsAnalyzed?: number; skipped?: string };
-      console.log(
-        `\n→ Zelda audit: ${json.correctionsAnalyzed ?? 0} correções analisadas, ${
-          Array.isArray(json.findings) ? json.findings.length : 0
-        } finding(s)${json.skipped ? ` (skipped: ${json.skipped})` : ''}`,
-      );
-    } else {
-      console.warn(`→ Zelda audit HTTP ${res.status}`);
+  const cronSecret = await getSecret('CRON_SECRET');
+  if (!cronSecret) {
+    console.warn('→ CRON_SECRET ausente · skip Zelda audit (configure em /settings)');
+  } else {
+    try {
+      const res = await fetch(`${baseUrl}/api/zelda/audit-matcher?incremental=1`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-service-key': cronSecret,
+        },
+      });
+      const text = await res.text();
+      if (res.ok) {
+        try {
+          const json = JSON.parse(text) as { findings?: unknown[]; correctionsAnalyzed?: number; skipped?: string };
+          console.log(
+            `\n→ Zelda audit: ${json.correctionsAnalyzed ?? 0} correções analisadas, ${
+              Array.isArray(json.findings) ? json.findings.length : 0
+            } finding(s)${json.skipped ? ` (skipped: ${json.skipped})` : ''}`,
+          );
+        } catch {
+          console.warn(`→ Zelda audit resp não-JSON: ${text.slice(0, 100)}`);
+        }
+      } else {
+        console.warn(`→ Zelda audit HTTP ${res.status}: ${text.slice(0, 200)}`);
+      }
+    } catch (e) {
+      console.warn('→ Zelda audit fail:', e instanceof Error ? e.message : e);
     }
-  } catch (e) {
-    console.warn('→ Zelda audit fail:', e instanceof Error ? e.message : e);
-  } finally {
-    await prisma.$disconnect();
   }
+  await prisma.$disconnect();
 }
 
 runWithWorkerLog('vendtef_entrada', main).catch((err) => {
