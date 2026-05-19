@@ -4,9 +4,9 @@ import { TEAM, CEO, SUB_AGENTS, avatarUrl, type Agent } from '@/lib/agents/team'
 export const dynamic = 'force-static';
 
 const STATUS = {
-  active: { label: '🟢 Ativo', cls: 'bg-emerald-100 text-emerald-800' },
-  building: { label: '🟡 Em construção', cls: 'bg-amber-100 text-amber-800' },
-  planned: { label: '⚪ Planejado', cls: 'bg-navy-50 text-navy/60' },
+  active: { label: '🟢 ativo', cls: 'text-emerald-600' },
+  building: { label: '🟡 em build', cls: 'text-amber-600' },
+  planned: { label: '⚪ planejado', cls: 'text-navy/40' },
 } as const;
 
 const COLOR_RING: Record<Agent['color'], string> = {
@@ -28,109 +28,98 @@ const COLOR_TEXT: Record<Agent['color'], string> = {
 
 export default function TeamPage() {
   return (
-    <main className="mx-auto max-w-6xl px-4 py-10">
+    <main className="mx-auto max-w-4xl px-4 py-10">
       <header className="mb-10 text-center">
-        <h1 className="text-4xl font-bold text-navy">Time Vendetti</h1>
-        <p className="mt-2 text-navy/60">
-          {TEAM.length} agentes pra operar a máquina. <strong>{CEO.name}</strong> orquestra os {SUB_AGENTS.length} sub-agentes.
+        <h1 className="text-3xl font-bold text-navy">Time Vendetti</h1>
+        <p className="mt-2 text-sm text-navy/60">
+          {TEAM.length} agentes IA pra operar a máquina · <strong>{CEO.name}</strong> orquestra os{' '}
+          {SUB_AGENTS.length} sub-agentes. Clique num card pra ver detalhes operacionais ao vivo.
         </p>
       </header>
 
-      {/* CEO em destaque */}
-      <section className="mb-6 flex justify-center">
-        <AgentCard agent={CEO} featured />
+      {/* CEO em destaque — maior e centralizado */}
+      <section className="mb-10 flex justify-center">
+        <AgentCard agent={CEO} size="large" />
       </section>
 
       {/* Linha-guia decorativa */}
-      <div className="relative mx-auto mb-8 h-12 max-w-4xl">
-        <svg className="h-full w-full" viewBox="0 0 800 48" preserveAspectRatio="none" aria-hidden>
-          <line x1="400" y1="0" x2="100" y2="48" stroke="#1F3864" strokeOpacity="0.25" strokeWidth="1.5" strokeDasharray="4 4" />
-          <line x1="400" y1="0" x2="300" y2="48" stroke="#1F3864" strokeOpacity="0.25" strokeWidth="1.5" strokeDasharray="4 4" />
-          <line x1="400" y1="0" x2="500" y2="48" stroke="#1F3864" strokeOpacity="0.25" strokeWidth="1.5" strokeDasharray="4 4" />
-          <line x1="400" y1="0" x2="700" y2="48" stroke="#1F3864" strokeOpacity="0.25" strokeWidth="1.5" strokeDasharray="4 4" />
+      <div className="relative mx-auto mb-6 h-10 max-w-3xl">
+        <svg className="h-full w-full" viewBox="0 0 800 40" preserveAspectRatio="none" aria-hidden>
+          <line x1="400" y1="0" x2="80" y2="40" stroke="#1F3864" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="4 4" />
+          <line x1="400" y1="0" x2="240" y2="40" stroke="#1F3864" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="4 4" />
+          <line x1="400" y1="0" x2="400" y2="40" stroke="#1F3864" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="4 4" />
+          <line x1="400" y1="0" x2="560" y2="40" stroke="#1F3864" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="4 4" />
+          <line x1="400" y1="0" x2="720" y2="40" stroke="#1F3864" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="4 4" />
         </svg>
       </div>
 
-      {/* Sub-agentes em grid (5 agora, 2/3 cols responsivo) */}
-      <section className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Sub-agentes em grid 5 cols (compact) */}
+      <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {SUB_AGENTS.map((a) => (
-          <AgentCard key={a.id} agent={a} />
+          <AgentCard key={a.id} agent={a} size="small" />
         ))}
       </section>
 
-      <footer className="mt-12 rounded-lg border border-navy/10 bg-white p-5 text-sm text-navy/70">
-        <strong className="text-navy">Como o time funciona:</strong> Vendetti recebe ticks (cron diário, mensagem do Luís via
-        chat ou reclamação) e delega para o sub-agente certo. Cada sub-agente tem ferramentas limitadas e segue as policies
-        da Zelda. Toda decisão vira registro no decision log com nível 🟢🟡🔴 — o histórico é a memória persistente entre runs.
-      </footer>
+      {/* Como funciona o time */}
+      <section className="mt-12 rounded-lg border border-navy/10 bg-white p-5 text-sm text-navy/75">
+        <strong className="text-navy">Como o time funciona:</strong> Augusto Vendetti orquestra os sub-agentes. Cada
+        sub-agente tem ferramentas limitadas e segue policies. Toda decisão vira registro no decision log
+        com nível 🟢🟡🔴 — o histórico é a memória persistente entre runs. Augusto fala com o Luís
+        diretamente; os outros agentes trabalham em background (cron, webhook, scraper) ou via UI dedicada.
+      </section>
     </main>
   );
 }
 
-function AgentCard({ agent, featured }: { agent: Agent; featured?: boolean }) {
+function AgentCard({ agent, size }: { agent: Agent; size: 'small' | 'large' }) {
   const status = STATUS[agent.status];
   const ringCls = COLOR_RING[agent.color];
   const textCls = COLOR_TEXT[agent.color];
-  const size = featured ? 144 : 88;
 
+  if (size === 'large') {
+    return (
+      <Link
+        href={`/equipe/${agent.id}`}
+        className="group block w-full max-w-sm rounded-2xl border-2 border-navy/15 bg-white p-6 text-center shadow-sm transition hover:scale-105 hover:border-navy/40 hover:shadow-lg"
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={avatarUrl(agent, 160)}
+          alt={agent.name}
+          width={120}
+          height={120}
+          className={`mx-auto rounded-full ring-4 ${ringCls} transition group-hover:ring-8`}
+        />
+        <h2 className={`mt-4 text-2xl font-bold ${textCls}`}>{agent.fullName ?? agent.name}</h2>
+        <div className={`mt-1 text-sm font-medium ${textCls} opacity-75`}>{agent.role}</div>
+        <p className="mt-2 text-xs italic text-navy/55">"{agent.tagline}"</p>
+        <span className={`mt-3 inline-block text-xs ${status.cls}`}>{status.label}</span>
+        <div className="mt-4 text-[11px] font-semibold text-navy/40 group-hover:text-navy">
+          abrir perfil completo →
+        </div>
+      </Link>
+    );
+  }
+
+  // Compact card
   return (
     <Link
       href={`/equipe/${agent.id}`}
-      className={`block rounded-2xl border border-navy/10 bg-white p-5 shadow-sm transition hover:-translate-y-1 hover:border-navy/25 hover:shadow-md ${
-        featured ? 'w-full max-w-md text-center' : ''
-      }`}
+      className="group flex flex-col items-center rounded-lg border border-navy/10 bg-white p-3 text-center transition hover:scale-110 hover:border-navy/40 hover:shadow-lg hover:z-10"
     >
-      <div className={featured ? 'flex flex-col items-center' : 'flex items-start gap-4'}>
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={avatarUrl(agent, size)}
-          alt={agent.name}
-          width={size}
-          height={size}
-          className={`shrink-0 rounded-full ring-4 ${ringCls} ${featured ? 'mb-4' : ''}`}
-        />
-        <div className={featured ? '' : 'min-w-0 flex-1'}>
-          <div className={`flex items-center gap-2 ${featured ? 'justify-center' : ''}`}>
-            <h2 className={`${featured ? 'text-2xl' : 'text-lg'} font-bold ${textCls}`}>{agent.id === 'vendetti' ? (agent.fullName ?? agent.name) : agent.name}</h2>
-            <span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-medium ${status.cls}`}>
-              {status.label}
-            </span>
-          </div>
-          <p className={`text-sm font-medium ${textCls} opacity-80`}>{agent.role}</p>
-          <p className={`mt-1 ${featured ? 'text-sm' : 'text-xs'} italic text-navy/55`}>"{agent.tagline}"</p>
-          {agent.fullName && featured && (
-            <p className="mt-1 text-xs text-navy/45">Nome formal: {agent.fullName}</p>
-          )}
-        </div>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={avatarUrl(agent, 100)}
+        alt={agent.name}
+        width={72}
+        height={72}
+        className={`rounded-full ring-2 ${ringCls} transition group-hover:ring-4`}
+      />
+      <div className={`mt-2 text-sm font-semibold ${textCls}`}>{agent.name}</div>
+      <div className="text-[10px] uppercase tracking-wide text-navy/50">
+        {agent.role.split(' · ')[0].split('/')[0].trim()}
       </div>
-
-      <p className={`${featured ? 'mt-5' : 'mt-3'} text-sm leading-relaxed text-navy/75`}>{agent.description}</p>
-
-      <div className={`${featured ? 'mt-3' : 'mt-2'} flex items-center gap-1.5 text-xs text-navy/45`}>
-        <svg viewBox="0 0 16 16" className="h-3 w-3 fill-current opacity-60"><circle cx="8" cy="8" r="3" /></svg>
-        {agent.origin}
-      </div>
-
-      <div className={`mt-4 grid gap-3 ${featured ? 'sm:grid-cols-2' : ''}`}>
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-navy/40">O que faz</div>
-          <ul className="mt-1 space-y-0.5 text-xs text-navy/70">
-            {agent.responsibilities.map((r) => (
-              <li key={r}>· {r}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <div className="text-[10px] font-semibold uppercase tracking-wide text-navy/40">Ferramentas</div>
-          <ul className="mt-1 space-y-0.5 text-xs text-navy/55 font-mono">
-            {agent.tools.map((t) => (
-              <li key={t}>· {t}</li>
-            ))}
-          </ul>
-        </div>
-      </div>
-
-      <div className="mt-4 text-right text-xs font-semibold text-navy/40">ver perfil →</div>
+      <span className={`mt-1 text-[10px] ${status.cls}`}>{status.label}</span>
     </Link>
   );
 }
