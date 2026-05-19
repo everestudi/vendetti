@@ -119,35 +119,42 @@ export async function configurarProdutoNoEstoque(
 
     // Captura URL antes pra detectar navegação
     const urlBefore = page.url();
-    const ctx = page.context();
-    const opensNewTab =
-      linkAttrs.target === '_blank' ||
-      Boolean(linkAttrs.onclick && /window\.open|target.*_blank/i.test(linkAttrs.onclick));
+    const browserCtx = page.context();
+    const pagesBefore = browserCtx.pages().length;
+
+    // SEMPRE escuta evento de nova page antes do click. Vendtef pode abrir
+    // em nova aba via jQuery handler (target=_blank atribuído programaticamente
+    // OU window.open dentro do click handler). Não dá pra detectar pelo atributo
+    // estático do link — só dá pra ver depois.
+    const newPagePromise = browserCtx
+      .waitForEvent('page', { timeout: 6_000 })
+      .catch(() => null);
 
     let targetPage: Page = page;
-    if (opensNewTab) {
-      // Vendtef abre em nova aba — escuta o evento + troca de page
-      const newPagePromise = ctx.waitForEvent('page', { timeout: 10_000 });
-      await configLink.click({ force: true });
-      try {
-        targetPage = await newPagePromise;
-        await targetPage.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
-        console.log(`    ✓ aba nova aberta: ${targetPage.url()}`);
-      } catch (e) {
-        return { ok: false, error: `link era target=_blank mas aba nova não abriu: ${e instanceof Error ? e.message : e}` };
-      }
-    } else if (linkAttrs.href && linkAttrs.href.startsWith('http') && !linkAttrs.href.includes('javascript:')) {
+    if (linkAttrs.href && linkAttrs.href.startsWith('http') && !linkAttrs.href.includes('javascript:')) {
       // Navegação direta via href absoluto
       await page.goto(linkAttrs.href, { waitUntil: 'domcontentloaded' });
-      targetPage = page;
     } else {
-      // Click + aguarda mudança de URL ou load. Usa force=true pq botões
-      // do Vendtef podem ter overlay/animation issues.
-      await Promise.all([
-        page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
-        configLink.click({ force: true, timeout: 5_000 }),
-      ]);
-      targetPage = page;
+      await configLink.click({ force: true, timeout: 5_000 });
+    }
+
+    // Aguarda nova page abrir OU page atual carregar. Se nova abriu, usa ela.
+    const newPage = await newPagePromise;
+    if (newPage) {
+      targetPage = newPage;
+      await targetPage.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
+      console.log(`    ✓ aba nova aberta: ${targetPage.url()}`);
+    } else {
+      // Sem nova aba — checa se context tem mais pages agora (race condition)
+      const pagesAfter = browserCtx.pages();
+      if (pagesAfter.length > pagesBefore) {
+        targetPage = pagesAfter[pagesAfter.length - 1];
+        await targetPage.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
+        console.log(`    ✓ nova page detectada via context: ${targetPage.url()}`);
+      } else {
+        await page.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+        console.log(`    sem aba nova · continua na page atual`);
+      }
     }
     await targetPage.waitForTimeout(1_500);
     await targetPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
