@@ -132,16 +132,19 @@ async function openEverestProdutosConfigurados(page: Page): Promise<{ ok: boolea
 async function extractRowsFromModal(page: Page): Promise<EverestRow[]> {
   // Tabela #produtos dentro do modal. Headers: Produto, Código, Atual, Alerta, Crítico (assumido)
   return page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('.modal:visible table#produtos tbody tr, .modal-dialog:visible table#produtos tbody tr'));
-    // Fallback: qualquer tabela visível dentro do modal
-    let trList: HTMLTableRowElement[] = Array.from(rows as HTMLTableRowElement[]);
-    if (trList.length === 0) {
-      const modal = Array.from(document.querySelectorAll('.modal, .modal-dialog')).find((m) => {
-        const title = m.querySelector('.modal-title, h4')?.textContent?.trim() ?? '';
-        return /produtos\s+configurados/i.test(title) && (m as HTMLElement).offsetParent !== null;
-      });
-      if (modal) {
-        trList = Array.from(modal.querySelectorAll('table tbody tr')) as HTMLTableRowElement[];
+    // `:visible` é jQuery, não CSS válido — usa filter manual via offsetParent
+    const visibleModal = Array.from(document.querySelectorAll('.modal, .modal-dialog')).find((m) => {
+      if ((m as HTMLElement).offsetParent === null) return false;
+      const title = m.querySelector('.modal-title, h4')?.textContent?.trim() ?? '';
+      return /produtos\s+configurados/i.test(title);
+    });
+    let trList: HTMLTableRowElement[] = [];
+    if (visibleModal) {
+      // Primeiro tenta table#produtos especificamente; fallback pra qualquer table
+      const produtosTable = visibleModal.querySelector('table#produtos');
+      const targetTable = (produtosTable ?? visibleModal.querySelector('table')) as HTMLTableElement | null;
+      if (targetTable) {
+        trList = Array.from(targetTable.querySelectorAll('tbody tr')) as HTMLTableRowElement[];
       }
     }
 
