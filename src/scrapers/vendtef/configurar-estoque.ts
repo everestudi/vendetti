@@ -194,33 +194,45 @@ export async function configurarProdutoNoEstoque(
     writeFileSync(`${OUT_DIR}/${slug}-02b-post-click.json`, JSON.stringify(postClickInspect, null, 2));
     await targetPage.waitForTimeout(1_500);
     await targetPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-    await dismissModals(targetPage);
+    // NÃO dismissModals — o modal de "Produtos Configurados" é exatamente onde
+    // queremos estar. dismissModals fecharia ele.
     await targetPage.screenshot({ path: `${OUT_DIR}/${slug}-02-produtos-config.png`, fullPage: true });
 
-    // VERIFICA que estamos na página correta
-    const urlAfter = targetPage.url();
-    const pageTitle = await targetPage.title();
-    if ((urlAfter === urlBefore && targetPage === page) || /adicionar.*estoque/i.test(pageTitle)) {
+    // VERIFICA que o modal "Produtos Configurados" abriu (Vendtef não navega,
+    // abre Bootstrap modal sobre a lista de estoques).
+    const modalCheck = await targetPage.evaluate(() => {
+      const modals = Array.from(document.querySelectorAll('.modal, [role="dialog"], .modal-dialog'))
+        .filter((m) => (m as HTMLElement).offsetParent !== null);
+      for (const m of modals) {
+        const title = m.querySelector('.modal-title, .ui-dialog-title, h4')?.textContent?.trim() ?? '';
+        if (/produtos\s+configurados/i.test(title)) {
+          return { ok: true, title };
+        }
+      }
+      const isModalOpen = document.body.classList.contains('modal-open');
+      return { ok: false, isModalOpen, modalCount: modals.length };
+    });
+    if (!modalCheck.ok) {
       writeFileSync(
-        `${OUT_DIR}/${slug}-02-no-navigation.json`,
-        JSON.stringify({ urlBefore, urlAfter, pageTitle, linkAttrs }, null, 2),
+        `${OUT_DIR}/${slug}-02-no-modal.json`,
+        JSON.stringify({ urlBefore, modalCheck, postClickInspect, linkAttrs }, null, 2),
       );
       return {
         ok: false,
-        error: `click em "Produtos Configurados" não navegou (url=${urlAfter}, title=${pageTitle}). Ver -02-no-navigation.json`,
+        error: `modal "Produtos Configurados" não abriu após click. Ver -02-no-modal.json`,
       };
     }
+    console.log(`    ✓ modal aberto: ${modalCheck.title}`);
 
-    // Daqui pra frente, usa `targetPage` (pode ser nova aba) em vez de `page`.
-    // Re-aliasa pra simplificar — todas as operações subsequentes no script
-    // usam `page` como variável local desta function-scope.
+    // Daqui em diante, page = targetPage e todas operações são scoped ao modal.
     page = targetPage;
+    const modal = page.locator('.modal-dialog').filter({ has: page.locator('.modal-title, h4').filter({ hasText: /produtos\s+configurados/i }) }).first();
 
-    // 3. Pre-check: produto já está na lista?
+    // 3. Pre-check: produto já está na tabela do modal?
     const targetTokens = normalize(productName).split(' ').filter((t) => t.length >= 3).slice(0, 4);
-    const existing = await page.evaluate((tokens) => {
+    const existing = await modal.evaluate((modalEl, tokens) => {
       const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
+      const rows = Array.from(modalEl.querySelectorAll('table tbody tr'));
       for (const tr of rows) {
         const cells = Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
         const rowText = norm(cells.join(' '));
@@ -232,16 +244,27 @@ export async function configurarProdutoNoEstoque(
 
     if (existing.found) {
       console.log(`    ✓ produto "${productName}" já configurado no estoque "${estoqueName}"`);
+      // Fecha o modal antes de retornar
+      await page.keyboard.press('Escape').catch(() => undefined);
       return { ok: true, alreadyConfigured: true };
     }
 
-    // 4. Clica "Adicionar"
-    const addBtn = page.locator('a:has-text("Adicionar"), button:has-text("Adicionar"), #addProd, .btn:has-text("Adicionar")').first();
+    // 4. Clica "Adicionar" DENTRO do modal (não o "+ Adicionar" do header!)
+    const addBtn = modal.locator('a, button').filter({ hasText: /adicionar/i }).first();
     if ((await addBtn.count()) === 0) {
-      writeFileSync(`${OUT_DIR}/${slug}-02-no-add.txt`, await page.content().then((c) => c.slice(0, 4000)).catch(() => 'fail'));
-      return { ok: false, error: 'botão "Adicionar" não achado em Produtos Configurados' };
+      // Dump elementos clicáveis do modal pra debug
+      const modalElements = await modal.evaluate((m) =>
+        Array.from(m.querySelectorAll('a, button, input[type="submit"], input[type="button"]')).map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? '').trim().slice(0, 60),
+          id: (el as HTMLElement).id,
+          className: (el as HTMLElement).className.slice(0, 80),
+        })),
+      );
+      writeFileSync(`${OUT_DIR}/${slug}-03-no-add.json`, JSON.stringify(modalElements, null, 2));
+      return { ok: false, error: 'botão "Adicionar" não achado no modal · ver -03-no-add.json' };
     }
-    await addBtn.click();
+    await addBtn.click({ force: true });
     await page.waitForTimeout(1_500);
     await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
     await page.screenshot({ path: `${OUT_DIR}/${slug}-03-add-form.png`, fullPage: true });
