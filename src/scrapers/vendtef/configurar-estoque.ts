@@ -69,43 +69,73 @@ export async function configurarProdutoNoEstoque(
     await dismissModals(page);
     await page.screenshot({ path: `${OUT_DIR}/${slug}-01-estoques.png`, fullPage: true });
 
-    // 2. Acha link "Produtos Configurados" da row do estoque alvo
-    const linkInfo = await page.evaluate((target) => {
-      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-      const targetN = norm(target);
-      const rows = Array.from(document.querySelectorAll('table tbody tr'));
-      for (const tr of rows) {
-        const cells = Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
-        const rowText = cells.join(' ');
-        if (!norm(rowText).includes(targetN)) continue;
-        // Acha link/btn "Produtos Configurados" na row
-        const links = Array.from(tr.querySelectorAll('a, button')) as HTMLAnchorElement[];
-        for (const l of links) {
-          const text = (l.textContent ?? '').toLowerCase();
-          const title = (l.title ?? '').toLowerCase();
-          if (text.includes('produtos') || title.includes('produtos') || text.includes('configurados')) {
-            return { ok: true, href: l.href ?? null, text: l.textContent?.trim() ?? '', rowText };
-          }
-        }
-        return { ok: false, reason: `Row "${rowText.slice(0, 80)}" achada mas sem link Produtos Configurados`, rowText };
-      }
-      return { ok: false, reason: `estoque "${target}" não achado na lista` };
-    }, estoqueName);
-
-    if (!linkInfo.ok) {
-      writeFileSync(`${OUT_DIR}/${slug}-01-rows.txt`, JSON.stringify(linkInfo, null, 2));
-      return { ok: false, error: linkInfo.reason };
+    // 2. Acha row do estoque alvo via Playwright locator (estável,
+    // testável, ao contrário do evaluate hand-rolled). Usa containment
+    // case-insensitive pra ser tolerante a "Estoque Everest" vs "EVEREST".
+    const targetRegex = new RegExp(estoqueName.replace(/\s+/g, '\\s*'), 'i');
+    const row = page.locator('tr').filter({ hasText: targetRegex }).first();
+    if ((await row.count()) === 0) {
+      // Dump rows pra debug
+      const allRows = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('tr')).map((r) => r.textContent?.replace(/\s+/g, ' ').trim().slice(0, 200)),
+      );
+      writeFileSync(`${OUT_DIR}/${slug}-01-no-row.json`, JSON.stringify({ estoqueName, allRows }, null, 2));
+      return { ok: false, error: `row do estoque "${estoqueName}" não achada · ver -01-no-row.json` };
     }
 
-    if (linkInfo.href) {
-      await page.goto(linkInfo.href, { waitUntil: 'domcontentloaded' });
+    // 3. Clica no botão/link "Produtos Configurados" DENTRO da row alvo.
+    // IMPORTANTE: scoped to row pra não pegar links de sidebar/header.
+    const configLink = row.locator('a, button').filter({ hasText: /produtos\s+configurados/i }).first();
+    if ((await configLink.count()) === 0) {
+      // Dump elementos da row pra debug
+      const rowElements = await row.evaluate((tr) =>
+        Array.from(tr.querySelectorAll('a, button')).map((el) => ({
+          tag: el.tagName.toLowerCase(),
+          text: (el.textContent ?? '').trim(),
+          href: (el as HTMLAnchorElement).href ?? '',
+          onclick: el.getAttribute('onclick') ?? '',
+          className: (el as HTMLElement).className,
+        })),
+      );
+      writeFileSync(`${OUT_DIR}/${slug}-01-no-link.json`, JSON.stringify(rowElements, null, 2));
+      return { ok: false, error: '"Produtos Configurados" não achado na row · ver -01-no-link.json' };
+    }
+
+    // Captura URL antes pra detectar navegação
+    const urlBefore = page.url();
+
+    // Tenta navegação direta via href se disponível (mais confiável que click)
+    const href = await configLink.getAttribute('href');
+    if (href && href.startsWith('http') && !href.includes('javascript:')) {
+      await page.goto(href, { waitUntil: 'domcontentloaded' });
     } else {
-      // Caso o link seja JS-only: usa text-match no click
-      await page.locator(`text="${linkInfo.text}"`).first().click();
+      // Click + aguarda mudança de URL ou load. Usa force=true pq botões
+      // do Vendtef podem ter overlay/animation issues.
+      await Promise.all([
+        page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
+        configLink.click({ force: true, timeout: 5_000 }),
+      ]);
     }
+    await page.waitForTimeout(1_500);
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
     await dismissModals(page);
     await page.screenshot({ path: `${OUT_DIR}/${slug}-02-produtos-config.png`, fullPage: true });
+
+    // VERIFICA que navegamos pra página correta. Se URL não mudou OU
+    // título não bate, NÃO continua — evita seguir cego e clicar no
+    // "+ Adicionar" do header (que cria novo estoque, não produto).
+    const urlAfter = page.url();
+    const pageTitle = await page.title();
+    if (urlAfter === urlBefore || /adicionar.*estoque/i.test(pageTitle)) {
+      writeFileSync(
+        `${OUT_DIR}/${slug}-02-no-navigation.json`,
+        JSON.stringify({ urlBefore, urlAfter, pageTitle }, null, 2),
+      );
+      return {
+        ok: false,
+        error: `click em "Produtos Configurados" não navegou (url=${urlAfter}, title=${pageTitle}). Ver -02-no-navigation.json`,
+      };
+    }
 
     // 3. Pre-check: produto já está na lista?
     const targetTokens = normalize(productName).split(' ').filter((t) => t.length >= 3).slice(0, 4);
