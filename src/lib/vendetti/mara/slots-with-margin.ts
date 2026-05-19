@@ -13,12 +13,13 @@ export async function getSlotsWithMargin(): Promise<SlotData[]> {
   if (!machine) return [];
   const rows = await prisma.slot.findMany({
     where: { machineId: machine.id },
-    include: { sku: true },
+    include: { sku: { include: { everestStock: true } } },
   });
   return rows.map((r) => {
     const price = r.price ? Number(r.price) : null;
     const marginEst = r.marginEst ? Number(r.marginEst) : null;
     const marginPct = price && marginEst ? Number(((marginEst / price) * 100).toFixed(1)) : null;
+    const everest = r.sku?.everestStock;
     return {
       selecao: r.position,
       productName: r.sku?.name ?? null,
@@ -27,8 +28,12 @@ export async function getSlotsWithMargin(): Promise<SlotData[]> {
       marginEst,
       marginPct,
       capacity: r.capacity,
+      currentQty: r.currentQty,
       qtdeAlerta: r.qtdeAlerta,
       qtdeCritico: r.qtdeCritico,
+      everestQty: everest?.qty ?? null,
+      everestStatus: everest?.status ?? null,
+      everestUpdatedAt: everest?.updatedAt ?? null,
     };
   });
 }

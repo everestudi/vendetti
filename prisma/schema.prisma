@@ -28,12 +28,36 @@ model Sku {
   transactions    Transaction[]
   reposicoes      ReposicaoItem[]
   purchaseItems   PurchaseItem[]
+  everestStock    EverestStock?
 }
 
 enum Supplier {
   ATACADAO
   VITTAL
   OUTRO
+}
+
+/// Estado atual do estoque Everest (warehouse compartilhado).
+/// Atualizado pela Mara a cada sync — scraper navega em /erp/estoques/everest/
+/// produtos-configurados e captura a tabela.
+///
+/// Single row por SKU (atual). Histórico não é necessário aqui — a evolução
+/// é capturada em Reposicao (entradas) + Transaction (saídas indiretas via
+/// abastecimento da máquina).
+model EverestStock {
+  id        String   @id @default(cuid())
+  skuId     String   @unique
+  sku       Sku      @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  qty       Int      // quantidade atual no Everest
+  alerta    Int      // limite pra alerta
+  critico   Int      // limite pra crítico
+  /// Status capturado pelo Vendtef (ok / alerta / crítico). String aberta.
+  status    String?
+  updatedAt DateTime @updatedAt
+  capturedAt DateTime @default(now())
+
+  @@index([qty])
+  @@index([status])
 }
 
 // === Máquina física ===

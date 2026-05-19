@@ -18,6 +18,7 @@ import {
 } from '../../../scrapers/_shared/playwright';
 import { extractTransactionsLastNMonths, type RawTransaction } from './extract-transactions';
 import { extractCancellationsLastNMonths, type RawCancellation } from './extract-cancellations';
+import { scrapeEverestStock, type ScrapeEverestResult } from './scrape-everest';
 
 export interface RawSlot {
   selecao: string;
@@ -69,6 +70,7 @@ export interface ExtractResult {
   dailyRevenue: RawDailyRevenue[];
   transactions: RawTransaction[];
   cancellations: RawCancellation[];
+  everestStock?: ScrapeEverestResult;
 }
 
 const MACHINE_LABEL = 'Maquina BlueMall Rondon';
@@ -87,9 +89,16 @@ export async function extractAll(): Promise<ExtractResult> {
     const transactions = await extractTransactionsLastNMonths(ctx, 6);
     console.log('  extraindo cancelamentos (últimos 3 meses)...');
     const cancellations = await extractCancellationsLastNMonths(ctx, 3);
+    console.log('  scrape Estoque Everest (warehouse)...');
+    const everestStock = await scrapeEverestStock(ctx);
+    if (everestStock.ok) {
+      console.log(`  ✓ Everest · ${everestStock.matched}/${everestStock.rowsCaptured} produtos atualizados`);
+    } else {
+      console.warn(`  ⚠ Everest scrape falhou: ${everestStock.error} — sync continua normal`);
+    }
 
     await ctx.storageState({ path: SESSION_PATH });
-    return { slots, skus, snapshot, dailyRevenue, transactions, cancellations };
+    return { slots, skus, snapshot, dailyRevenue, transactions, cancellations, everestStock };
   } finally {
     await ctx.close();
     await browser.close();

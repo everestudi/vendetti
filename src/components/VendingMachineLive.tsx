@@ -12,8 +12,13 @@ export interface SlotData {
   marginEst: number | null;
   marginPct: number | null;
   capacity: number;
+  currentQty?: number;
   qtdeAlerta: number | null;
   qtdeCritico: number | null;
+  /** Qty no Estoque Everest do mesmo produto (warehouse). null = produto não rastreado lá. */
+  everestQty?: number | null;
+  everestStatus?: string | null;
+  everestUpdatedAt?: Date | null;
 }
 
 interface Props {
@@ -114,6 +119,12 @@ function SlotTile({
       ? 'bg-rose-100 ring-rose-300'
       : meta.bgClass;
 
+  // Indicadores visuais:
+  //  · dot vermelho top-right: slot crítico (margem baixa)
+  //  · dot top-left: Everest sem estoque (laranja se baixo, vermelho se 0)
+  const everestEmpty = slot.everestQty !== undefined && slot.everestQty !== null && slot.everestQty === 0;
+  const everestLow = slot.everestStatus === 'crítico' || (slot.everestQty !== null && slot.everestQty !== undefined && slot.everestQty > 0 && slot.everestStatus === 'alerta');
+
   return (
     <Link
       href={`/mara?slot=${slot.selecao}`}
@@ -123,6 +134,21 @@ function SlotTile({
     >
       <div className="text-lg leading-none">{meta.emoji}</div>
       <div className="mt-0.5 text-[7px] font-mono text-navy/55">{slot.selecao}</div>
+      {/* badge Everest na parte inferior */}
+      {slot.everestQty !== undefined && slot.everestQty !== null && (
+        <div
+          className={`absolute -bottom-0.5 right-0.5 rounded-tl rounded-bl-sm px-1 py-px text-[6px] font-bold leading-tight ${
+            everestEmpty
+              ? 'bg-rose-500 text-white'
+              : everestLow
+                ? 'bg-amber-400 text-amber-900'
+                : 'bg-navy/70 text-white'
+          }`}
+          title={`Everest: ${slot.everestQty} unidades · status ${slot.everestStatus ?? '?'}`}
+        >
+          E{slot.everestQty}
+        </div>
+      )}
       {critical && (
         <div className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-rose-500" />
       )}
@@ -168,8 +194,20 @@ function ProductPanel({ slot }: { slot: SlotData | null }) {
         <Metric label="Preço" value={slot.price !== null ? `R$ ${slot.price.toFixed(2)}` : '—'} />
         <Metric label="Lucro/un" value={slot.marginEst !== null ? `R$ ${slot.marginEst.toFixed(2)}` : '—'} />
         <Metric label="Margem" value={slot.marginPct !== null ? `${slot.marginPct.toFixed(0)}%` : '—'} valueClass={marginPctClass} />
-        <Metric label="Capacidade" value={`${slot.capacity}`} />
-        <Metric label="Alerta" value={slot.qtdeAlerta?.toString() ?? '—'} />
+        <Metric label="Na máquina" value={slot.currentQty !== undefined ? `${slot.currentQty}/${slot.capacity}` : `${slot.capacity}`} />
+        <Metric
+          label="Estoque Everest"
+          value={slot.everestQty !== null && slot.everestQty !== undefined ? `${slot.everestQty}` : '—'}
+          valueClass={
+            slot.everestQty === 0
+              ? 'text-rose-700'
+              : slot.everestStatus === 'crítico'
+                ? 'text-rose-700'
+                : slot.everestStatus === 'alerta'
+                  ? 'text-amber-700'
+                  : 'text-navy'
+          }
+        />
         <Metric label="Crítico" value={slot.qtdeCritico?.toString() ?? '—'} />
       </div>
 
