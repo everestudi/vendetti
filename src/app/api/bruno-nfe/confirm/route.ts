@@ -14,10 +14,11 @@
  *   - cria PurchaseItem vinculado
  */
 
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { prisma } from '@/lib/db';
 import { getSecret } from '@/lib/secrets';
 import type { Supplier } from '@prisma/client';
+import { auditMatchCorrections } from '@/lib/vendetti/zelda';
 
 async function triggerVendtefSync(purchaseId: string): Promise<{ ok: boolean; error?: string }> {
   const pat = await getSecret('GITHUB_PAT');
@@ -199,9 +200,40 @@ export async function POST(req: Request) {
 
   // Dispara sync no Vendtef em background (não bloqueia resposta)
   const dispatch = await triggerVendtefSync(purchase.id);
+
+  // 🤖 AUTO-TRIGGER: Zelda audita correções incremental e notifica Luís via
+  // WhatsApp quando achar padrão importante/crítico. Fire-and-forget — não
+  // bloqueia resposta. Cabe num lambda hobby porque Haiku é rápido (~3-5s) e
+  // só dispara se houve correções novas.
+  const correctionsCount = body.items.filter((it) => {
+    const sug = it.suggestedSkuId ?? null;
+    const fin = it.skuId ?? null;
+    const fa = it.finalAction ?? 'match';
+    return (sug && fa === 'new') || (sug && fin && sug !== fin) || (!sug && fa === 'match' && fin);
+  }).length;
+  if (correctionsCount > 0) {
+    // Next 16 `after()` mantém o lambda vivo pra rodar trabalho pós-resposta.
+    // Confirm retorna logo, Zelda roda em paralelo (Haiku ~3-5s) e notifica
+    // Luís via WhatsApp se houver finding importante/crítico.
+    after(async () => {
+      try {
+        const r = await auditMatchCorrections({ limit: 30, incrementalOnly: true, notifyLuis: true });
+        if (!r.ok) {
+          console.warn('[zelda auto-trigger]', r.error);
+        } else if (r.findings.length > 0) {
+          console.log(`[zelda] auto-trigger gerou ${r.findings.length} finding(s)`);
+        }
+      } catch (e) {
+        console.warn('[zelda auto-trigger crash]', e instanceof Error ? e.message : e);
+      }
+    });
+  }
+
   return NextResponse.json({
     ok: true,
     purchaseId: purchase.id,
     vendtefSync: dispatch.ok ? 'queued' : `not-queued: ${dispatch.error}`,
+    correctionsFound: correctionsCount,
+    zeldaAuditTriggered: correctionsCount > 0,
   });
 }

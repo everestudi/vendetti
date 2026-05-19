@@ -9,6 +9,7 @@ import { auditMatchCorrections } from '@/lib/vendetti/zelda';
  * /equipe/zelda.
  */
 export async function runZeldaAudit() {
-  await auditMatchCorrections(30);
+  // Manual: revisa últimos 30 (não-incremental) + notifica Luís
+  await auditMatchCorrections({ limit: 30, incrementalOnly: false, notifyLuis: true });
   revalidatePath('/equipe/zelda');
 }

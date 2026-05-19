@@ -14,12 +14,17 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
-export async function POST() {
-  const result = await auditMatchCorrections(30);
+export async function POST(req: Request) {
+  const url = new URL(req.url);
+  const incremental = url.searchParams.get('incremental') === '1';
+  const result = await auditMatchCorrections({
+    limit: 30,
+    incrementalOnly: incremental,
+    notifyLuis: true,
+  });
   return NextResponse.json(result);
 }
 
-export async function GET() {
-  // Permite testar via browser também (mesmo behavior)
-  return POST();
+export async function GET(req: Request) {
+  return POST(req);
 }

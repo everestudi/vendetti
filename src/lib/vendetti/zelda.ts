@@ -16,6 +16,7 @@
 import { prisma } from '../db';
 import Anthropic from '@anthropic-ai/sdk';
 import { getSecret } from '../secrets';
+import { sendText } from '../zapi/send';
 
 interface MatchCorrectionEvent {
   capturedAt: string;
@@ -74,24 +75,51 @@ REGRAS:
 - augustoPrompt curto (max 200 chars) e auto-suficiente
 - Output APENAS o JSON array, sem markdown, sem texto explicativo`;
 
-export async function auditMatchCorrections(limit = 30): Promise<{
+export async function auditMatchCorrections(opts: {
+  limit?: number;
+  /** Se true (default em chamadas automáticas), só analisa correções NOVAS
+   *  desde o último audit OK. Evita re-analisar e gerar Ideas duplicadas. */
+  incrementalOnly?: boolean;
+  /** Se true, manda WhatsApp pro Luís com findings importantes/críticos. */
+  notifyLuis?: boolean;
+} = {}): Promise<{
   ok: boolean;
   findings: ZeldaFinding[];
   correctionsAnalyzed: number;
+  skipped?: 'no-new-corrections' | 'no-corrections';
   error?: string;
 }> {
-  // 1. Busca correções recentes (últimos 30 dias, max N)
+  const limit = opts.limit ?? 30;
+  const incrementalOnly = opts.incrementalOnly ?? false;
+  const notifyLuis = opts.notifyLuis ?? false;
+
+  // Cutoff: se incremental, só corrige após o último audit OK
+  let cutoff = new Date(Date.now() - 30 * 24 * 3600 * 1000); // 30d default
+  if (incrementalOnly) {
+    const lastAudit = await prisma.workerRun.findFirst({
+      where: { name: 'zelda_audit_matcher', status: 'OK' },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (lastAudit) cutoff = lastAudit.startedAt;
+  }
+
+  // 1. Busca correções recentes (após cutoff, max N)
   const corrections = await prisma.workerRun.findMany({
     where: {
       name: 'match_correction',
-      startedAt: { gte: new Date(Date.now() - 30 * 24 * 3600 * 1000) },
+      startedAt: { gte: cutoff },
     },
     orderBy: { startedAt: 'desc' },
     take: limit,
   });
 
   if (corrections.length === 0) {
-    return { ok: true, findings: [], correctionsAnalyzed: 0 };
+    return {
+      ok: true,
+      findings: [],
+      correctionsAnalyzed: 0,
+      skipped: incrementalOnly ? 'no-new-corrections' : 'no-corrections',
+    };
   }
 
   // 2. Resolve nomes dos SKUs reais (actualSkuId)
@@ -176,7 +204,31 @@ Retorne APENAS o JSON array de findings (sem markdown, sem prefixo).`;
     }
 
     // 5. Persiste como Ideas (status=NEW, Luís revisa em /equipe/zelda)
+    // Dedup: skip se já existe Idea NEW com mesmo suggestedFix nos últimos 7d
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    const recentIdeas = await prisma.idea.findMany({
+      where: { createdAt: { gte: sevenDaysAgo }, status: 'NEW', content: { startsWith: '[Zelda' } },
+    });
+    const existingFixes = new Set(
+      recentIdeas
+        .map((i) => {
+          try {
+            return (JSON.parse(i.note ?? '{}') as ZeldaFinding).suggestedFix.toLowerCase().trim();
+          } catch {
+            return null;
+          }
+        })
+        .filter((s): s is string => Boolean(s)),
+    );
+
+    const persistedFindings: ZeldaFinding[] = [];
     for (const f of findings) {
+      const key = f.suggestedFix.toLowerCase().trim();
+      if (existingFixes.has(key)) {
+        console.log(`[zelda] dedupe · pulando finding já existente: ${f.suggestedFix.slice(0, 60)}`);
+        continue;
+      }
+      existingFixes.add(key);
       await prisma.idea
         .create({
           data: {
@@ -185,6 +237,32 @@ Retorne APENAS o JSON array de findings (sem markdown, sem prefixo).`;
           },
         })
         .catch((e) => console.warn('[zelda idea persist]', e instanceof Error ? e.message : e));
+      persistedFindings.push(f);
+    }
+
+    // 5b. Notificar Luís via WhatsApp se há finding importante/crítico.
+    // Sugestões silenciam — só "importante" ou "crítico" tira ele do dia-a-dia.
+    if (notifyLuis) {
+      const noisy = persistedFindings.filter((f) => f.severity === 'importante' || f.severity === 'crítico');
+      if (noisy.length > 0) {
+        const luisPhone = await getSecret('LUIS_PHONE');
+        const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
+        if (luisPhone) {
+          const lines = [
+            `🔍 Zelda detectou ${noisy.length} ponto(s) de melhoria:`,
+            '',
+            ...noisy.slice(0, 3).map((f, i) => {
+              const emoji = f.severity === 'crítico' ? '🔴' : '🟡';
+              return `${emoji} ${f.pattern}\n  fix: ${f.suggestedFix.slice(0, 100)}\n  prompt: ${f.augustoPrompt.slice(0, 180)}`;
+            }),
+            '',
+            `Detalhes: ${base}/equipe/zelda`,
+          ].join('\n');
+          await sendText(luisPhone, lines).catch((e) =>
+            console.warn('[zelda notify]', e instanceof Error ? e.message : e),
+          );
+        }
+      }
     }
 
     // 6. Log da run pra histórico
@@ -205,7 +283,7 @@ Retorne APENAS o JSON array de findings (sem markdown, sem prefixo).`;
       },
     });
 
-    return { ok: true, findings, correctionsAnalyzed: events.length };
+    return { ok: true, findings: persistedFindings, correctionsAnalyzed: events.length };
   } catch (err) {
     return {
       ok: false,
