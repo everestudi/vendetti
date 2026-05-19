@@ -16,6 +16,35 @@ function normalize(s: string): string {
     .trim();
 }
 
+/// Palavras-ruído de descrições NF-e (Atacadão, Assaí) — não ajudam a
+/// distinguir entre produtos.
+const NOISE_TOKENS = new Set([
+  'ref', 'lata', 'sleek', 'und', 'un', 'unid', 'unidade',
+  'emb', 'embal', 'embalagem',
+  'gar', 'garrafa', 'pet', 'pack',
+  'cxa', 'cx', 'caixa', 'fardo',
+  'br', 'nacional', 'naci', 'imp',
+  '1x1', '6x1', '12x1', '24x1',
+  'nfe', 'sa', 'sgl',
+]);
+
+/// Discriminadores: presença unilateral derruba o score a 0.
+const DISCRIMINATORS = [
+  'zero', 'diet', 'light', 'sem',
+  'watermelon', 'amora', 'morango', 'baunilha', 'limao',
+  'tropical', 'pipeline', 'mango', 'maracuja',
+  'ultra',
+];
+
+function meaningfulTokens(name: string): Set<string> {
+  return new Set(
+    normalize(name)
+      .split(' ')
+      .filter((w) => w.length >= 2)
+      .filter((w) => !NOISE_TOKENS.has(w)),
+  );
+}
+
 export interface SkuLike {
   id: string;
   name: string;
@@ -29,25 +58,29 @@ export interface SkuMatchResult {
 }
 
 /**
- * Busca o melhor match de `target` na lista de skus pelo nome.
- * Score = (tokens compartilhados / tokens da target) * 100, ajustado pra
- * penalizar mismatches em discriminadores conhecidos (sabor, com/sem gás).
+ * Busca o melhor match de `target` (nome com ruído da NF-e ou input do user)
+ * na lista de skus do catálogo limpo.
+ *
+ * Score = containment do MENOR conjunto no MAIOR (asymmetric):
+ *   shared / min(tokens-significativos) · 100
+ *
+ * Discriminadores conflitantes → score 0 (evita Coca ↔ Coca Zero, Monster
+ * Pipeline ↔ Monster Watermelon).
+ *
+ * Noise tokens (REF, LATA, SLEEK, etc) são descontados antes de medir.
  */
 export function matchSku(target: string, skus: SkuLike[]): SkuMatchResult {
+  if (!target.trim() || skus.length === 0) return { match: null, score: 0, confidence: 'none' };
   const t = normalize(target);
-  if (!t || skus.length === 0) return { match: null, score: 0, confidence: 'none' };
-  const tTokens = t.split(' ').filter((w) => w.length >= 3);
-  if (tTokens.length === 0) return { match: null, score: 0, confidence: 'none' };
-
-  // Discriminadores: se um tem e outro não, score 0 (não é match)
-  const DISCR = ['zero', 'diet', 'light', 'watermelon', 'amora', 'morango', 'baunilha', 'tropical', 'pipeline', 'mango'];
+  const tTokens = meaningfulTokens(target);
+  if (tTokens.size === 0) return { match: null, score: 0, confidence: 'none' };
 
   let best: SkuMatchResult = { match: null, score: 0, confidence: 'none' };
   for (const sku of skus) {
     const n = normalize(sku.name);
-    // Discriminator check
+    // Discriminator check (em raw normalized string pra pegar palavras pequenas)
     let discrConflict = false;
-    for (const d of DISCR) {
+    for (const d of DISCRIMINATORS) {
       if (t.includes(d) !== n.includes(d)) {
         discrConflict = true;
         break;
@@ -55,11 +88,21 @@ export function matchSku(target: string, skus: SkuLike[]): SkuMatchResult {
     }
     if (discrConflict) continue;
 
-    const nTokens = new Set(n.split(' ').filter((w) => w.length >= 3));
+    const nTokens = meaningfulTokens(sku.name);
+    if (nTokens.size === 0) continue;
+
+    // F1 score: precision (shared/target) + recall (shared/catalog).
+    // Penaliza catálogo genérico vs target específico: ex target tem 7 tokens
+    // {beb, energ, red, bull, 250ml, frutas, vermelhas}, catálogo "Red Bull
+    // 250ml" tem 3 tokens — recall=100% mas precision=3/7=43% → F1=60%.
+    // Já catálogo "Red Bull Frutas Vermelhas 250ml" com 7 tokens iguais → F1=100%.
     let shared = 0;
     for (const tk of tTokens) if (nTokens.has(tk)) shared++;
     if (shared === 0) continue;
-    const score = Math.round((shared / tTokens.length) * 100);
+    const precision = shared / tTokens.size;
+    const recall = shared / nTokens.size;
+    const f1 = (2 * precision * recall) / (precision + recall);
+    const score = Math.round(f1 * 100);
     if (score > best.score) {
       const confidence: SkuMatchResult['confidence'] =
         score >= 80 ? 'high' : score >= 50 ? 'mid' : 'low';

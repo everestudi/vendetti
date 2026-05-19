@@ -208,14 +208,65 @@ function normalize(s: string): string {
     .trim();
 }
 
-/// Similaridade simples baseada em tokens compartilhados (0-100).
+/// Palavras-ruído de descrições NF-e (Atacadão, Assaí) — não ajudam a
+/// distinguir entre produtos. Vão ser ignoradas no score.
+const NOISE_TOKENS = new Set([
+  'ref', 'lata', 'sleek', 'und', 'un', 'unid', 'unidade',
+  'emb', 'embal', 'embalagem',
+  'gar', 'garrafa', 'pet', 'pack',
+  'cxa', 'cx', 'caixa', 'fardo',
+  'br', 'nacional', 'naci', 'imp',
+  '1x1', '6x1', '12x1', '24x1',
+  'nfe', 'sa', 'sgl', // sleek single
+]);
+
+/// Tokens DISCRIMINADORES: presença unilateral derruba o score a 0 (são
+/// variantes de produto que NÃO podem ser confundidas).
+const DISCRIMINATORS = [
+  'zero', 'diet', 'light', 'sem',
+  'watermelon', 'amora', 'morango', 'baunilha', 'limao', 'limão',
+  'tropical', 'pipeline', 'mango', 'maracuja',
+  'ultra', // variantes Monster Ultra X
+];
+
+function tokensFor(name: string): Set<string> {
+  return new Set(
+    name
+      .split(' ')
+      .filter((t) => t.length >= 2)
+      .filter((t) => !NOISE_TOKENS.has(t)),
+  );
+}
+
+/**
+ * Score 0-100 entre nome A (geralmente da NF-e, com ruído) e nome B
+ * (do catálogo, limpo). Asymmetric containment: quantos dos tokens do
+ * catálogo aparecem na NF-e (descontando ruído). Mais robusto que Jaccard
+ * pra nomes com prefixos do fornecedor (REF, LATA, etc).
+ *
+ * Discriminadores conflitantes → score 0 (evita Coca ↔ Coca Zero etc).
+ */
 function similarity(a: string, b: string): number {
-  const ta = new Set(a.split(' ').filter((t) => t.length >= 2));
-  const tb = new Set(b.split(' ').filter((t) => t.length >= 2));
+  const ta = tokensFor(a);
+  const tb = tokensFor(b);
   if (ta.size === 0 || tb.size === 0) return 0;
+
+  // Discriminator check: se um tem e outro não, fail-fast
+  // (em normalized raw pra pegar palavras pequenas tipo "sem")
+  const ra = a;
+  const rb = b;
+  for (const d of DISCRIMINATORS) {
+    if (ra.includes(d) !== rb.includes(d)) return 0;
+  }
+
+  // F1 score: harmonic mean de precision (shared/A) e recall (shared/B).
+  // Penaliza match com candidato "genérico" quando o target tem tokens extras
+  // que sugerem variante específica (Frutas Vermelhas, Watermelon, etc).
   let shared = 0;
   for (const t of ta) if (tb.has(t)) shared++;
-  // Jaccard
-  const union = new Set([...ta, ...tb]).size;
-  return Math.round((shared / union) * 100);
+  if (shared === 0) return 0;
+  const precision = shared / ta.size;
+  const recall = shared / tb.size;
+  const f1 = (2 * precision * recall) / (precision + recall);
+  return Math.round(f1 * 100);
 }
