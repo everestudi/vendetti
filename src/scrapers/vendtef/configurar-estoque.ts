@@ -137,6 +137,26 @@ export async function configurarProdutoNoEstoque(
     await page.waitForLoadState('networkidle', { timeout: 5_000 }).catch(() => undefined);
     await page.screenshot({ path: `${OUT_DIR}/${slug}-03-add-form.png`, fullPage: true });
 
+    // Dump de todos os inputs/buttons na página pós-Adicionar
+    const formFields = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('input:not([type="hidden"]), select, textarea, button'))
+        .filter((el) => (el as HTMLElement).offsetParent !== null)
+        .map((el) => {
+          const e = el as HTMLInputElement;
+          return {
+            tag: el.tagName.toLowerCase(),
+            name: e.name,
+            id: e.id,
+            type: e.type ?? '',
+            value: (e.value ?? '').slice(0, 80),
+            placeholder: e.placeholder ?? '',
+            text: (el.textContent ?? '').trim().slice(0, 80),
+            className: (el as HTMLElement).className.slice(0, 100),
+          };
+        });
+    });
+    writeFileSync(`${OUT_DIR}/${slug}-03b-form-fields.json`, JSON.stringify(formFields, null, 2));
+
     // 5. Procura o input de "palavra-chave" e digita
     const searchSelectors = [
       'input[placeholder*="palavra" i]',
@@ -150,19 +170,67 @@ export async function configurarProdutoNoEstoque(
       'input[type="text"]:visible',
     ];
     let searchFilled = false;
+    let usedSelector = '';
     for (const sel of searchSelectors) {
       const inp = page.locator(sel).first();
       if (await inp.isVisible({ timeout: 500 }).catch(() => false)) {
         await inp.fill(productName);
         searchFilled = true;
+        usedSelector = sel;
         break;
       }
     }
     if (!searchFilled) {
-      return { ok: false, error: 'input de palavra-chave não achado' };
+      writeFileSync(`${OUT_DIR}/${slug}-04-no-search.txt`, JSON.stringify({ tried: searchSelectors, formFields }, null, 2));
+      return { ok: false, error: 'input de palavra-chave não achado · ver -04-no-search.txt' };
     }
-    await page.waitForTimeout(1_500); // aguarda autocomplete
+    console.log(`    palavra-chave preenchida via selector: ${usedSelector}`);
+    await page.waitForTimeout(2_000); // aguarda autocomplete
     await page.screenshot({ path: `${OUT_DIR}/${slug}-04-typed.png`, fullPage: true });
+
+    // Dump TUDO que tá visível agora (autocomplete, dropdowns, etc) pra debug
+    const visibleListItems = await page.evaluate(() => {
+      const candidateSelectors = [
+        'ul.ui-autocomplete li',
+        '.autocomplete-suggestion',
+        '.select2-results__option',
+        '[role="option"]',
+        'ul.dropdown-menu li',
+        '.tt-suggestion',
+        '.typeahead.dropdown-menu li',
+        'li.suggestion',
+        '.results li',
+        '.suggestion-list li',
+      ];
+      const out: Array<{ selector: string; visible: boolean; text: string; className: string }> = [];
+      for (const sel of candidateSelectors) {
+        const els = Array.from(document.querySelectorAll(sel));
+        for (const el of els.slice(0, 20)) {
+          const visible = (el as HTMLElement).offsetParent !== null;
+          out.push({
+            selector: sel,
+            visible,
+            text: (el.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 80),
+            className: (el as HTMLElement).className.slice(0, 80),
+          });
+        }
+      }
+      // Também dump select.option (caso seja dropdown nativo)
+      const selects = Array.from(document.querySelectorAll('select')).filter((s) => (s as HTMLElement).offsetParent !== null);
+      for (const s of selects.slice(0, 3)) {
+        const opts = Array.from(s.options).slice(0, 30);
+        for (const o of opts) {
+          out.push({
+            selector: `select#${s.id}.option`,
+            visible: true,
+            text: (o.textContent ?? '').trim().slice(0, 80),
+            className: `value=${o.value}`,
+          });
+        }
+      }
+      return out;
+    });
+    writeFileSync(`${OUT_DIR}/${slug}-04b-list-items.json`, JSON.stringify(visibleListItems, null, 2));
 
     // 6. Seleciona o produto (autocomplete/dropdown/select)
     const targetN = normalize(productName);

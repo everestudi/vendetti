@@ -50,6 +50,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: vendtef-sync-${{ github.run_id }}
-          path: tmp/vendtef-entrada/
+          # Sobe tmp/ inteiro (vendtef-entrada/, vendtef-configurar/, etc)
+          path: tmp/
           retention-days: 7
           if-no-files-found: ignore
