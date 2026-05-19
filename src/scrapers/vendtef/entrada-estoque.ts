@@ -21,6 +21,7 @@ import { prisma } from '../../lib/db';
 import { getSecret } from '../../lib/secrets';
 import { dismissModals } from '../_shared/playwright';
 import { runWithWorkerLog } from '../../lib/infra/health';
+import { configurarProdutoNoEstoque } from './configurar-estoque';
 
 const OUT_DIR = './tmp/vendtef-entrada';
 const ERP_HOME = 'https://www.erpvending.com.br/';
@@ -382,6 +383,20 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<Syn
         const r = await cadastrarProduto(ctx, u.ourName, unitCost, productCode);
         cadastros.push({ ourName: u.ourName, result: r });
         console.log(`    ${r.ok ? '✓' : '✗'} ${u.ourName}${r.error ? ` — ${r.error.slice(0, 80)}` : ''}`);
+        // CRÍTICO: depois de cadastrar, precisa configurar no estoque Everest
+        // pra ele aparecer na lista de Entrada de Estoque. Senão produto fica
+        // órfão e a entrada vai falhar (não acha o pid).
+        if (r.ok) {
+          const cfg = await configurarProdutoNoEstoque(ctx, 'Estoque Everest', u.ourName, {
+            estoqueMaximo: 100,
+            alerta: 2,
+            critico: 1,
+          });
+          console.log(`    ${cfg.ok ? '✓' : '✗'} config-estoque "${u.ourName}"${cfg.alreadyConfigured ? ' (já configurado)' : ''}${cfg.error ? ` — ${cfg.error.slice(0, 80)}` : ''}`);
+          if (!cfg.ok) {
+            cadastros[cadastros.length - 1].result = { ok: false, error: `cadastrou mas falhou config-estoque: ${cfg.error}` };
+          }
+        }
       }
       writeFileSync(`${OUT_DIR}/cadastros.json`, JSON.stringify(cadastros, null, 2));
 

@@ -25,6 +25,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { getSecret } from '../../lib/secrets';
 import { dismissModals } from '../_shared/playwright';
+import { configurarProdutoNoEstoque } from './configurar-estoque';
 
 const OUT_DIR = './tmp/vendtef-abastecimento';
 const LOGIN_URL = 'https://www.erpvending.com.br/auth/login/index';
@@ -545,6 +546,18 @@ export async function runAbastecimento(items: AbastecimentoItemInput[]): Promise
           continue;
         }
         results[idx].productCreated = true;
+        // Configura no estoque da MÁQUINA (não Everest — esse é warehouse).
+        // Sem isso, abastecimento não acha o produto na lista.
+        const cfgMachine = await configurarProdutoNoEstoque(ctx, TARGET_MACHINE, target, {
+          estoqueMaximo: 100,
+          alerta: 2,
+          critico: 1,
+        });
+        if (!cfgMachine.ok) {
+          results[idx] = { ...results[idx], error: `config-estoque máquina falhou: ${cfgMachine.error}` };
+          continue;
+        }
+        console.log(`    ✓ config-estoque máquina${cfgMachine.alreadyConfigured ? ' (já estava)' : ''}`);
         // Re-faz SSO caso navegação pra /produtos tenha invalidado contexto
         await ssoVendtef(ctx).catch(() => undefined);
         const sw = await swapSlotProduct(ctx, it.slotPosition, target);
