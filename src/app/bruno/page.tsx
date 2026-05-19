@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
 import { AgentTerminal } from '@/components/AgentTerminal';
+import { resyncPurchase } from './actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -210,8 +211,19 @@ export default async function BrunoPage() {
                       {' · '}
                       {SOURCE_LABEL[p.source] ?? p.source}
                     </div>
-                    <div className="mt-1">
+                    <div className="mt-1 flex items-center gap-2">
                       <SyncBadge p={p} />
+                      {(p.vendtefSyncError || !p.vendtefSyncedAt) && (
+                        <form action={resyncPurchase.bind(null, p.id)}>
+                          <button
+                            type="submit"
+                            className="rounded border border-navy/15 bg-white px-2 py-0.5 text-[10px] font-medium text-navy/75 hover:bg-navy/5"
+                            title="Re-dispara o scraper vendtef-sync pra essa Purchase"
+                          >
+                            🔄 re-sync
+                          </button>
+                        </form>
+                      )}
                     </div>
                   </div>
                   <div className="text-right text-lg font-semibold text-navy">
