@@ -52,6 +52,12 @@ interface ConfirmItem {
   qty: number;
   unitCost: number;
   totalCost: number;
+  /** Pra Zelda auditar: o que o matcher sugeriu automático */
+  suggestedSkuId?: string | null;
+  suggestedScore?: number | null;
+  suggestedName?: string | null;
+  /** O que Luís escolheu na UI ('match' = vinculou, 'new' = criou novo) */
+  finalAction?: 'match' | 'new';
 }
 
 interface ConfirmBody {
@@ -144,6 +150,52 @@ export async function POST(req: Request) {
 
     return p;
   });
+
+  // Captura correções de match pra auditoria da Zelda.
+  // Pra cada item, compara o que matcher sugeriu vs o que Luís escolheu.
+  // Casos relevantes:
+  //   - matcher sugeriu A, Luís escolheu B (correção)
+  //   - matcher sugeriu A, Luís marcou como NOVO (correção)
+  //   - matcher não sugeriu nada, Luís vinculou manual a B (descoberta)
+  //   - matcher acertou: skip log (não é correção)
+  for (const it of body.items) {
+    const suggested = it.suggestedSkuId ?? null;
+    const final = it.skuId ?? null;
+    const finalAction = it.finalAction ?? 'match';
+    const isCorrection =
+      // matcher sugeriu mas Luís discordou
+      (suggested && finalAction === 'new') ||
+      (suggested && final && suggested !== final) ||
+      // matcher não achou mas Luís achou manual
+      (!suggested && finalAction === 'match' && final);
+    if (!isCorrection) continue;
+    await prisma.workerRun
+      .create({
+        data: {
+          name: 'match_correction',
+          status: 'OK',
+          finishedAt: new Date(),
+          meta: {
+            context: 'bruno-nfe',
+            purchaseId: purchase.id,
+            inputText: it.productName,
+            inputCode: it.productCode ?? null,
+            suggestedSkuId: suggested,
+            suggestedSkuName: it.suggestedName ?? null,
+            suggestedScore: it.suggestedScore ?? null,
+            actualSkuId: final,
+            finalAction,
+            // Tipo de correção pra Zelda agrupar
+            correctionType: !suggested
+              ? 'matcher_missed_should_match'
+              : finalAction === 'new'
+                ? 'matcher_suggested_should_create_new'
+                : 'matcher_suggested_wrong_match',
+          } as never,
+        },
+      })
+      .catch((e) => console.warn('[match_correction log]', e instanceof Error ? e.message : e));
+  }
 
   // Dispara sync no Vendtef em background (não bloqueia resposta)
   const dispatch = await triggerVendtefSync(purchase.id);

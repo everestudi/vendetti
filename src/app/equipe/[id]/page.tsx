@@ -6,6 +6,7 @@ import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
 import { AgentTerminal } from '@/components/AgentTerminal';
 import type { AgentScope } from '@/lib/agent-log';
+import { ZeldaSection } from '../zelda-section';
 
 export const dynamic = 'force-dynamic';
 
@@ -154,6 +155,9 @@ export default async function AgentPage({ params }: { params: Promise<{ id: stri
           />
         </section>
       )}
+
+      {/* Zelda · oversight loop */}
+      {agent.id === 'zelda' && <ZeldaSection />}
 
       {/* Terminal — log de eventos do agente */}
       {AGENT_SCOPE[agent.id] && (

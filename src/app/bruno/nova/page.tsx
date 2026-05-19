@@ -155,6 +155,11 @@ function NovaCompraInner() {
             qty: it.qty,
             unitCost: it.unitCost,
             totalCost: it.totalCost,
+            // Pra Zelda auditar: o que o matcher sugeriu vs o que Luís escolheu
+            suggestedSkuId: it.skuMatch?.id ?? null,
+            suggestedScore: it.skuMatch?.score ?? null,
+            suggestedName: it.skuMatch?.name ?? null,
+            finalAction: it.action, // 'match' | 'new'
           })),
         rawParsed: parsed,
       };
