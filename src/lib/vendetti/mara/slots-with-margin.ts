@@ -48,6 +48,7 @@ export async function getSlotsWithMargin(): Promise<SlotData[]> {
       selecao: r.position,
       productName: r.sku?.name ?? null,
       productCode: r.sku?.code ?? null,
+      productImageUrl: r.sku?.imageUrl ?? null,
       price,
       marginEst,
       marginPct,

@@ -7,6 +7,9 @@ export interface SlotData {
   selecao: string;
   productName: string | null;
   productCode: string | null;
+  /** URL da imagem do produto (Atacadão VTEX CDN). Renderizada como cartoon real
+   *  ao invés do emoji genérico quando presente. */
+  productImageUrl?: string | null;
   price: number | null;
   marginEst: number | null;
   marginPct: number | null;
@@ -166,10 +169,20 @@ function SlotTile({
       }`}
     >
       {/* Número do slot no canto superior esquerdo (mono, discreto) */}
-      <div className="absolute left-0.5 top-0 font-mono text-[7px] text-navy/45">{slot.selecao}</div>
+      <div className="absolute left-0.5 top-0 z-10 rounded-br bg-white/60 px-0.5 font-mono text-[7px] text-navy/55">{slot.selecao}</div>
 
       <div className="flex flex-1 items-center justify-center pt-2">
-        <div className="text-base leading-none">{meta.emoji}</div>
+        {slot.productImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={slot.productImageUrl}
+            alt={slot.productName ?? ''}
+            className="max-h-[70%] max-w-[80%] object-contain"
+            loading="lazy"
+          />
+        ) : (
+          <div className="text-base leading-none">{meta.emoji}</div>
+        )}
       </div>
 
       {/* Barrinha mola: mini bateria horizontal abaixo do emoji */}
@@ -222,8 +235,18 @@ function ProductPanel({ slot }: { slot: SlotData | null }) {
   return (
     <div className="rounded-lg border border-navy/10 bg-white p-5 shadow-sm">
       <div className="flex items-start gap-4">
-        <div className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-lg ${meta.bgClass} text-5xl`}>
-          {meta.emoji}
+        <div className={`flex h-24 w-24 shrink-0 items-center justify-center rounded-lg ${meta.bgClass} overflow-hidden`}>
+          {slot.productImageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={slot.productImageUrl}
+              alt={slot.productName ?? ''}
+              className="max-h-full max-w-full object-contain"
+              loading="lazy"
+            />
+          ) : (
+            <span className="text-5xl">{meta.emoji}</span>
+          )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-mono text-navy/40">SEL {slot.selecao} · {slot.productCode}</div>

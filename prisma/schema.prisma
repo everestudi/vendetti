@@ -21,6 +21,10 @@ model Sku {
   cost            Decimal  @db.Decimal(10, 2)
   price           Decimal  @db.Decimal(10, 2)
   marginPct       Decimal? @db.Decimal(5, 2) // (price - cost) / price * 100
+  /// URL da imagem do produto (CDN do fornecedor, geralmente Atacadão VTEX).
+  /// Populada pelo Bruno via fetchProductImage. Renderizada nos tiles da
+  /// máquina ao invés do emoji genérico quando presente.
+  imageUrl        String?  @db.Text
   active          Boolean  @default(true)
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
