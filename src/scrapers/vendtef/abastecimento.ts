@@ -22,6 +22,17 @@ import { sendToOperacaoGroup, sendText } from '../../lib/zapi/send';
 import { getSecret } from '../../lib/secrets';
 import type { Prisma } from '@prisma/client';
 
+interface LLMReview {
+  slotPosition: string;
+  recommendedAction: 'abastecer_only' | 'product_swap' | 'slot_swap_with' | 'create_new' | 'human_review';
+  confidence: number;
+  reasoning: string;
+  targetSkuId?: string;
+  targetSkuName?: string;
+  swapWithSlot?: string;
+  newProductName?: string;
+}
+
 interface DecisionItem {
   slotPosition: string;
   productGuess: string;
@@ -43,6 +54,8 @@ interface DecisionItem {
      *  ANTES de tentar abastecer a máquina (evita "sem estoque"). */
     entradaEstoqueQty?: number;
   };
+  /** Análise LLM (Haiku) que considerou contexto além do slot isolado. */
+  llmReview?: LLMReview | null;
 }
 
 async function loadDecision(decisionId: string) {
@@ -68,16 +81,34 @@ async function buildInputs(items: DecisionItem[]): Promise<AbastecimentoItemInpu
     });
     const currentSlotProduct = slot?.sku?.name ?? null;
 
-    // Decisão de swap:
-    //  - Se Luís preencheu targetProduct manualmente, usa isso
-    //  - Senão, se matchConfidence='low' OU productGuess diferente do slotProduct,
-    //    assume que Weverton trocou e usa productGuess como alvo
+    // Decisão de swap, em ordem de prioridade:
+    //  1. Override manual do Luís (targetProduct)
+    //  2. Recomendação da LLM (product_swap, slot_swap_with, create_new)
+    //  3. Fallback heurístico (low confidence → usa productGuess)
     let targetProductName: string | undefined;
+    let llmSwapWithSlot: string | undefined;
+    let llmSwapWithSlotProduct: string | null | undefined;
+
     if (it.targetProduct) {
       targetProductName = it.targetProduct;
+    } else if (it.llmReview) {
+      const act = it.llmReview.recommendedAction;
+      if (act === 'product_swap' || act === 'slot_swap_with') {
+        targetProductName = it.llmReview.targetSkuName ?? targetProductName;
+        if (act === 'slot_swap_with' && it.llmReview.swapWithSlot) {
+          llmSwapWithSlot = it.llmReview.swapWithSlot;
+          // Resolve qual produto tá no slot invertido HOJE (pra swap reverso)
+          const otherSlot = await prisma.slot.findFirst({
+            where: { machineId: machine.id, position: it.llmReview.swapWithSlot },
+            include: { sku: true },
+          });
+          llmSwapWithSlotProduct = otherSlot?.sku?.name ?? null;
+        }
+      } else if (act === 'create_new') {
+        targetProductName = it.llmReview.newProductName ?? it.productGuess;
+      }
+      // abastecer_only / human_review → skip swap (sem targetProductName)
     } else if (it.matchConfidence === 'low' && currentSlotProduct) {
-      // baixa confiança = provável troca. Vendtef vai precisar saber.
-      // Se productGuess parece um produto real (3+ tokens), tenta usar
       targetProductName = it.productGuess;
     }
 
@@ -87,6 +118,8 @@ async function buildInputs(items: DecisionItem[]): Promise<AbastecimentoItemInpu
       targetProductName,
       currentSlotProduct,
       newProductData: it.newProductData,
+      llmSwapWithSlot,
+      llmSwapWithSlotProduct,
     });
   }
   return out;

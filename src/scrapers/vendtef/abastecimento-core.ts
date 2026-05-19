@@ -54,6 +54,11 @@ export interface AbastecimentoItemInput {
      *  cadastrou via NF-e. */
     entradaEstoqueQty?: number;
   };
+  /** LLM detectou slot-swap (Vendtef invertido vs físico). Scraper precisa
+   *  fazer swap dos DOIS slots: este pid → targetProductName, e o outro slot
+   *  (`llmSwapWithSlot`) pid → `llmSwapWithSlotProduct` (o que estava aqui antes). */
+  llmSwapWithSlot?: string;
+  llmSwapWithSlotProduct?: string | null;
 }
 
 export interface AbastecimentoItemResult {
@@ -603,6 +608,28 @@ export async function runAbastecimento(items: AbastecimentoItemInput[]): Promise
         }
         results[idx].productSwapped = true;
         results[idx].finalPid = sw.newPid;
+
+        // 🔄 REVERSE SWAP: se LLM detectou slot_swap_with, troca o OUTRO slot
+        // pro produto original deste. Ex: 14↔15. Slot 14 vira Crisp (acima),
+        // slot 15 vira Delicious (aqui). Pra refletir realidade física.
+        if (it.llmSwapWithSlot && it.llmSwapWithSlotProduct && it.currentSlotProduct) {
+          console.log(
+            `  ↔️ slot_swap_with detectado: slot ${it.llmSwapWithSlot} também vai virar "${it.currentSlotProduct}"`,
+          );
+          const reverseSwap = await swapSlotProduct(
+            ctx,
+            it.llmSwapWithSlot,
+            it.currentSlotProduct,
+          );
+          if (!reverseSwap.ok) {
+            // Não interrompe — primeiro swap já passou. Apenas warning no log.
+            console.warn(
+              `    ⚠ reverse swap slot ${it.llmSwapWithSlot} falhou: ${reverseSwap.error}. Slot ${it.slotPosition} foi atualizado mas slot ${it.llmSwapWithSlot} continua antigo — pode requerer correção manual.`,
+            );
+          } else {
+            console.log(`    ✓ reverse swap slot ${it.llmSwapWithSlot} ok (${reverseSwap.newPid})`);
+          }
+        }
       }
     }
 
