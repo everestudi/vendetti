@@ -426,14 +426,33 @@ export async function configurarProdutoNoEstoque(
     await fillTriplet();
     await page.screenshot({ path: `${OUT_DIR}/${slug}-06-limites.png`, fullPage: true });
 
-    // 8. Salvar
-    const saveBtn = page.locator(
-      'button:has-text("Salvar"), input[type="submit"], input[name="save"], #save, button:has-text("Adicionar"):not(:has-text("Produto"))',
-    ).first();
+    // 8. Salvar — scoped ao MODAL TOPMOST (o do "Adicionar Produto ao estoque",
+    // que tá empilhado sobre o modal "Produtos Configurados"). O selector
+    // .first() global pegava errado.
+    const topModal = page.locator('.modal:visible, .modal-dialog:visible').last();
+    const saveBtn = topModal
+      .locator('button, input[type="submit"]')
+      .filter({ hasText: /^\s*salvar\s*$/i })
+      .first();
     if ((await saveBtn.count()) === 0) {
-      return { ok: false, error: 'botão Salvar não achado no form de configurar produto' };
+      // Fallback: tenta achar pelo ID/name
+      const fallback = topModal.locator('#save, input[name="save"]').first();
+      if ((await fallback.count()) === 0) {
+        const modalBtns = await topModal.evaluate((m) =>
+          Array.from(m.querySelectorAll('button, input[type="submit"]')).map((el) => ({
+            tag: el.tagName.toLowerCase(),
+            text: (el.textContent ?? '').trim().slice(0, 40) || (el as HTMLInputElement).value,
+            id: (el as HTMLElement).id,
+            className: (el as HTMLElement).className.slice(0, 60),
+          })),
+        );
+        writeFileSync(`${OUT_DIR}/${slug}-06b-no-save.json`, JSON.stringify(modalBtns, null, 2));
+        return { ok: false, error: 'botão Salvar não achado no modal · ver -06b-no-save.json' };
+      }
+      await fallback.click({ force: true });
+    } else {
+      await saveBtn.click({ force: true });
     }
-    await saveBtn.click();
     await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => undefined);
     await page.waitForTimeout(2_000);
     await page.screenshot({ path: `${OUT_DIR}/${slug}-07-saved.png`, fullPage: true });
