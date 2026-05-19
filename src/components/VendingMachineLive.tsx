@@ -148,6 +148,11 @@ function SlotTile({
         ? 'bg-amber-400'
         : 'bg-emerald-500';
 
+  // Format BR pro preço: R$ 4,50 (compact pra caber no tile)
+  const priceBR = slot.price !== null
+    ? slot.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
+    : null;
+
   return (
     <button
       type="button"
@@ -160,7 +165,10 @@ function SlotTile({
           : 'ring-navy/10 hover:scale-110 hover:ring-2 hover:ring-navy/40 hover:z-10'
       }`}
     >
-      <div className="flex flex-1 items-center justify-center pt-1">
+      {/* Número do slot no canto superior esquerdo (mono, discreto) */}
+      <div className="absolute left-0.5 top-0 font-mono text-[7px] text-navy/45">{slot.selecao}</div>
+
+      <div className="flex flex-1 items-center justify-center pt-2">
         <div className="text-base leading-none">{meta.emoji}</div>
       </div>
 
@@ -177,28 +185,13 @@ function SlotTile({
         })}
       </div>
 
-      <div className="mb-0.5 mt-px flex w-full items-center justify-between px-1">
-        <span className="font-mono text-[7px] text-navy/55">{slot.selecao}</span>
-        {slot.price !== null && (
-          <span className="font-mono text-[7px] font-bold text-navy/85">{slot.price.toFixed(1)}</span>
+      {/* Preço no formato BR R$X,XX embaixo */}
+      <div className="mb-0.5 mt-px flex w-full justify-center px-1">
+        {priceBR && (
+          <span className="font-mono text-[7px] font-bold text-navy/85">{priceBR}</span>
         )}
       </div>
 
-      {/* Badge Everest na parte inferior direita */}
-      {slot.everestQty !== undefined && slot.everestQty !== null && (
-        <div
-          className={`absolute -bottom-0.5 -right-0.5 rounded-tl rounded-bl-sm px-1 py-px text-[6px] font-bold leading-tight ${
-            everestEmpty
-              ? 'bg-rose-500 text-white'
-              : everestLow
-                ? 'bg-amber-400 text-amber-900'
-                : 'bg-navy/70 text-white'
-          }`}
-          title={`Everest: ${slot.everestQty} unidades · status ${slot.everestStatus ?? '?'}`}
-        >
-          E{slot.everestQty}
-        </div>
-      )}
       {critical && (
         <div className="absolute -right-0.5 -top-0.5 h-1.5 w-1.5 rounded-full bg-rose-500" />
       )}
