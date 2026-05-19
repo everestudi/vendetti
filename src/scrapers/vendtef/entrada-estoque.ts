@@ -75,7 +75,24 @@ interface PurchaseSnap {
   invoiceRef: string | null;
   occurredAt: Date;
   totalAmount: number;
-  items: { code: string; productName: string; qty: number; unitCost: number; needsCadastro: boolean }[];
+  /**
+   * productName aqui é o NOME LIMPO do nosso catálogo SKU — aquele que Luís
+   * confirmou (ou criou) na UI /bruno/nova. NÃO é o nome cru da NF-e.
+   * Pra audit/log também guardamos rawNfeName.
+   *
+   * Bug histórico (Coca Cola REF.LATA.SLEEK...): scraper usava productName=
+   * nome cru NF-e que confunde matcher mesmo com noise filter. Agora usa
+   * o nome do catálogo (Coca Cola 310ml) que bate idêntico ou quase com
+   * o que tá no Vendtef.
+   */
+  items: {
+    code: string;
+    productName: string; // nome limpo do nosso SKU (catálogo)
+    rawNfeName: string; // string crua da NF-e — só pra debug/auditoria
+    qty: number;
+    unitCost: number;
+    needsCadastro: boolean;
+  }[];
 }
 
 async function loadPurchase(purchaseId: string): Promise<PurchaseSnap> {
@@ -94,7 +111,8 @@ async function loadPurchase(purchaseId: string): Promise<PurchaseSnap> {
       .filter((it) => it.sku)
       .map((it) => ({
         code: it.sku!.code,
-        productName: it.productName,
+        productName: it.sku!.name, // ← clean catalog name, não o raw NF-e
+        rawNfeName: it.productName,
         qty: it.qty,
         unitCost: Number(it.unitCost),
         // Códigos provisórios (sem match real) começam com NFE-. Aí precisa cadastrar produto antes.
@@ -404,7 +422,10 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<Syn
     // 🤖 Audit pra Zelda: cada unmatched do pass 1 é uma falha do matcher.
     // Grava como match_correction event pra ela aprender o padrão depois.
     // Context = 'scraper-vendtef-entrada' distingue dos da UI Bruno.
+    // inputText = nome do nosso catálogo (Coca Cola 310ml) que Luís confirmou,
+    // não o raw NF-e — pq esse é o que o matcher REALMENTE consumiu.
     for (const u of unmatched) {
+      const purchaseItem = purchase.items.find((it) => it.productName === u.ourName);
       await prisma.workerRun.create({
         data: {
           name: 'match_correction',
@@ -413,7 +434,8 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<Syn
           meta: {
             context: 'scraper-vendtef-entrada',
             purchaseId: purchase.id,
-            inputText: u.ourName,
+            inputText: u.ourName, // nome limpo do SKU
+            rawNfeName: purchaseItem?.rawNfeName ?? null, // pro Zelda saber a origem
             suggestedSkuName: u.bestVendtefName !== '—' ? u.bestVendtefName : null,
             suggestedScore: u.bestScore,
             suggestedSkuId: null, // matcher comparou só por nome no Vendtef
