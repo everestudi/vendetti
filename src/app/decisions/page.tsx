@@ -125,6 +125,10 @@ interface NewProductData {
   cost?: number;
   category?: string;
   supplier?: 'ATACADAO' | 'VITTAL' | 'OUTRO';
+  /** Quando >0, scraper lança entrada de estoque no Everest com essa qty
+   *  antes de tentar abastecer a máquina. Usado quando produto é novo E
+   *  Bruno ainda não cadastrou via NF-e. */
+  entradaEstoqueQty?: number;
 }
 
 interface WevertonItem {
@@ -237,7 +241,7 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
                               </span>
                             )}
                           </div>
-                          <div className="grid grid-cols-3 gap-2">
+                          <div className="grid grid-cols-4 gap-2">
                             <div>
                               <label className="block text-[10px] text-navy/55">custo unit (R$)</label>
                               <input
@@ -272,7 +276,23 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
                                 <option value="OUTRO">Outro</option>
                               </select>
                             </div>
+                            <div>
+                              <label className="block text-[10px] text-navy/55" title="Pula se Bruno já lançou NF-e desse produto. Caso contrário scraper lança entrada de estoque no Everest com a qty informada (=qty da reposição é o default)">
+                                entrada Everest (qty)
+                              </label>
+                              <input
+                                type="number"
+                                name={`new_entrada_qty_${i}`}
+                                defaultValue={it.newProductData?.entradaEstoqueQty?.toString() ?? ''}
+                                placeholder={`vazio = pula · ${it.qty ?? 1} sugerido`}
+                                min={0}
+                                className="w-full rounded border border-amber-300 px-1 py-0.5"
+                              />
+                            </div>
                           </div>
+                          <p className="mt-1 text-[10px] text-navy/55">
+                            ℹ️ <strong>entrada Everest:</strong> deixa vazio se Bruno já cadastrou esse produto via NF-e. Senão preenche com a qty que tá disponível pra abastecer (scraper cria entrada de estoque no Everest antes de tentar abastecer a máquina, evita "produto sem estoque").
+                          </p>
                         </div>
                       )}
                     </div>

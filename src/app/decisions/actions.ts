@@ -68,12 +68,14 @@ export async function updateDecisionItems(id: string, formData: FormData) {
     const newCostRaw = formData.get(`new_cost_${i}`);
     const newCategoryRaw = formData.get(`new_category_${i}`);
     const newSupplierRaw = formData.get(`new_supplier_${i}`);
+    const newEntradaQtyRaw = formData.get(`new_entrada_qty_${i}`);
     let newProductData: Record<string, unknown> | undefined;
-    if (targetProduct && (newCostRaw || newCategoryRaw)) {
+    if (targetProduct && (newCostRaw || newCategoryRaw || newEntradaQtyRaw)) {
       newProductData = {
         cost: newCostRaw ? parseFloat(String(newCostRaw).replace(',', '.')) || 0 : undefined,
         category: newCategoryRaw ? String(newCategoryRaw).trim() : undefined,
         supplier: newSupplierRaw ? String(newSupplierRaw) : 'ATACADAO',
+        entradaEstoqueQty: newEntradaQtyRaw ? parseInt(String(newEntradaQtyRaw), 10) || undefined : undefined,
       };
     }
     return {

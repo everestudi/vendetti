@@ -25,7 +25,7 @@ import { chromium, type Browser, type BrowserContext, type Page } from 'playwrig
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { getSecret } from '../../lib/secrets';
 import { dismissModals } from '../_shared/playwright';
-import { configurarProdutoNoEstoque } from './configurar-estoque';
+import { configurarProdutoNoEstoque, lancarEntradaSingleProduct } from './configurar-estoque';
 
 const OUT_DIR = './tmp/vendtef-abastecimento';
 const LOGIN_URL = 'https://www.erpvending.com.br/auth/login/index';
@@ -49,6 +49,10 @@ export interface AbastecimentoItemInput {
     cost?: number;
     category?: string;
     supplier?: string;
+    /** Quando >0, scraper lança entrada de estoque no Everest com essa qty
+     *  ANTES de tentar abastecer a máquina. Pra casos onde Bruno ainda não
+     *  cadastrou via NF-e. */
+    entradaEstoqueQty?: number;
   };
 }
 
@@ -546,6 +550,38 @@ export async function runAbastecimento(items: AbastecimentoItemInput[]): Promise
           continue;
         }
         results[idx].productCreated = true;
+
+        // EDGE CASE: produto novo + Luís preencheu `entradaEstoqueQty`.
+        // Acontece quando Bruno ainda não rodou NF-e desse produto. Pra não
+        // travar a operação, scraper:
+        //  1. Configura no Everest (estoque warehouse)
+        //  2. Lança Entrada de Estoque single-product no Everest com a qty
+        // Depois segue fluxo normal (configurar máquina + swap + abastecer).
+        if (it.newProductData?.entradaEstoqueQty && it.newProductData.entradaEstoqueQty > 0) {
+          const qty = it.newProductData.entradaEstoqueQty;
+          console.log(`    📥 entrada Everest necessária · ${qty} unidade(s)`);
+          const cfgEverest = await configurarProdutoNoEstoque(ctx, 'Estoque Everest', target, {
+            estoqueMaximo: 100,
+            alerta: 2,
+            critico: 1,
+          });
+          if (!cfgEverest.ok) {
+            results[idx] = { ...results[idx], error: `config-Everest falhou: ${cfgEverest.error}` };
+            continue;
+          }
+          const entrada = await lancarEntradaSingleProduct(
+            ctx,
+            target,
+            qty,
+            it.newProductData.cost ?? 0,
+          );
+          if (!entrada.ok) {
+            results[idx] = { ...results[idx], error: `entrada Everest falhou: ${entrada.error}` };
+            continue;
+          }
+          console.log(`    ✓ entrada Everest registrada · ${qty} unidades`);
+        }
+
         // Configura no estoque da MÁQUINA (não Everest — esse é warehouse).
         // Sem isso, abastecimento não acha o produto na lista.
         const cfgMachine = await configurarProdutoNoEstoque(ctx, TARGET_MACHINE, target, {

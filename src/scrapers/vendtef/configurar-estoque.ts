@@ -18,6 +18,7 @@ import { dismissModals } from '../_shared/playwright';
 
 const OUT_DIR = './tmp/vendtef-configurar';
 const ESTOQUES_URL = 'https://www.erpvending.com.br/erp/estoques';
+const OPERACOES_URL = 'https://www.erpvending.com.br/erp/operacoes-estoque';
 
 export interface ConfigurarOpts {
   estoqueMaximo?: number;
@@ -245,6 +246,114 @@ export async function configurarProdutoNoEstoque(
       .catch(() => null);
     if (errAlert && errAlert.trim()) {
       return { ok: false, error: `Vendtef: ${errAlert.slice(0, 200)}` };
+    }
+    return { ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-error.png`, fullPage: true }).catch(() => undefined);
+    return { ok: false, error: msg };
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Lança Operação de Estoque > Entrada de Estoque single-product no estoque
+ * Everest. Usado pelo fluxo Weverton quando o produto é novo E não tem
+ * entrada de Bruno ainda (Luís preenche `entradaEstoqueQty` na Decision).
+ *
+ * Diferente da entrada-estoque.ts (que processa NF-e inteira com vários
+ * produtos), aqui é só 1 produto + qty + custo opcional.
+ */
+export async function lancarEntradaSingleProduct(
+  ctx: BrowserContext,
+  productName: string,
+  qty: number,
+  unitCost: number = 0,
+): Promise<{ ok: boolean; error?: string }> {
+  mkdirSync(OUT_DIR, { recursive: true });
+  const slug = `entrada_${normalize(productName).slice(0, 24).replace(/ /g, '-')}`;
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(30_000);
+
+  try {
+    await page.goto(OPERACOES_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await dismissModals(page);
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-01-operacoes.png`, fullPage: true });
+
+    // Estoque = Everest
+    const estoque = page.locator('#estoque');
+    const estoqueOpts = await estoque.locator('option').allTextContents();
+    const everestIdx = estoqueOpts.findIndex((o) => /everest/i.test(o));
+    if (everestIdx < 0) return { ok: false, error: '"Estoque Everest" não está na lista' };
+    await estoque.selectOption({ index: everestIdx });
+    await page.waitForTimeout(800);
+
+    // Tipo = Entrada de Estoque
+    await page.locator('#tipoOperacao').selectOption({ label: 'Entrada de Estoque' });
+    await page.waitForTimeout(2_500);
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForSelector('input.qtdes-lancar', { timeout: 15_000 });
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-02-entrada-form.png`, fullPage: true });
+
+    // Acha o produto na lista
+    const tokens = normalize(productName).split(' ').filter((t) => t.length >= 3).slice(0, 4);
+    const productInput = await page.evaluate((tokensJson) => {
+      const tokens = tokensJson as string[];
+      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+      const inputs = Array.from(document.querySelectorAll<HTMLInputElement>('input.qtdes-lancar'));
+      for (const inp of inputs) {
+        const tr = inp.closest('tr');
+        const nameCell = tr?.querySelector('td');
+        const name = (nameCell?.textContent ?? '').replace(/\s+/g, ' ').trim();
+        const n = norm(name);
+        if (tokens.length > 0 && tokens.every((t) => n.includes(t))) {
+          return { ok: true, pid: inp.name, name };
+        }
+      }
+      return { ok: false };
+    }, tokens);
+
+    if (!productInput.ok) {
+      writeFileSync(`${OUT_DIR}/${slug}-02-no-product.txt`, JSON.stringify({ productName, tokens }, null, 2));
+      return { ok: false, error: `produto "${productName}" não achado na lista de Entrada de Estoque (Everest). Foi cadastrado e configurado?` };
+    }
+
+    // Preenche qty
+    await page.locator(`input[name="${productInput.pid}"]`).fill(String(qty));
+
+    // Se houver campo de custo unit, preenche
+    const costInputs = page.locator(`input[name*="custo"], input[name*="preco"], input[name*="valor"]`);
+    if ((await costInputs.count()) > 0 && unitCost > 0) {
+      // Tenta achar o custo associado a essa row
+      const costInRow = page.locator(`tr:has(input[name="${productInput.pid}"]) input[name*="custo"], tr:has(input[name="${productInput.pid}"]) input[name*="preco"]`).first();
+      if ((await costInRow.count()) > 0) {
+        await costInRow.fill(unitCost.toFixed(2).replace('.', ',')).catch(() => undefined);
+      }
+    }
+
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-03-filled.png`, fullPage: true });
+
+    // Salva
+    await page.locator('input[name="save"], button:has-text("Salvar")').first().click();
+    await page.waitForTimeout(1_500);
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-04-modal.png`, fullPage: true });
+
+    // Confirma modal
+    const confirmBtn = page.locator('.modal:visible button:has-text("Confirmar"), [role="dialog"]:visible button:has-text("Confirmar"), button.btn-primary:has-text("Confirmar")').first();
+    if ((await confirmBtn.count()) === 0) {
+      return { ok: false, error: 'modal de confirmação não apareceu na entrada' };
+    }
+    await confirmBtn.click({ force: true });
+    await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => undefined);
+    await page.waitForTimeout(2_500);
+    await page.screenshot({ path: `${OUT_DIR}/${slug}-05-after.png`, fullPage: true });
+
+    const successText = await page.locator('.modal:visible, [role="dialog"]:visible').first().textContent({ timeout: 2_000 }).catch(() => '');
+    const txt = successText ?? '';
+    if (/erro|falhou|invalida|invál/i.test(txt)) {
+      return { ok: false, error: `Vendtef: ${txt.slice(0, 200)}` };
     }
     return { ok: true };
   } catch (err) {

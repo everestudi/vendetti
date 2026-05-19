@@ -39,6 +39,9 @@ interface DecisionItem {
     cost?: number;
     category?: string;
     supplier?: 'ATACADAO' | 'VITTAL' | 'OUTRO';
+    /** Quando >0, scraper lança entrada de estoque no Everest com essa qty
+     *  ANTES de tentar abastecer a máquina (evita "sem estoque"). */
+    entradaEstoqueQty?: number;
   };
 }
 
