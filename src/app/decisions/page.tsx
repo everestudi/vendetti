@@ -131,6 +131,17 @@ interface NewProductData {
   entradaEstoqueQty?: number;
 }
 
+interface LLMReview {
+  slotPosition: string;
+  recommendedAction: 'abastecer_only' | 'product_swap' | 'slot_swap_with' | 'create_new' | 'human_review';
+  confidence: number;
+  reasoning: string;
+  targetSkuId?: string;
+  targetSkuName?: string;
+  swapWithSlot?: string;
+  newProductName?: string;
+}
+
 interface WevertonItem {
   slotPosition?: string;
   qty?: number;
@@ -140,7 +151,16 @@ interface WevertonItem {
   targetProduct?: string;
   skip?: boolean;
   newProductData?: NewProductData;
+  llmReview?: LLMReview | null;
 }
+
+const LLM_ACTION_BADGE: Record<string, { cls: string; emoji: string; label: string }> = {
+  abastecer_only: { cls: 'bg-emerald-100 text-emerald-800', emoji: '✓', label: 'só abastecer' },
+  product_swap: { cls: 'bg-amber-100 text-amber-800', emoji: '🔄', label: 'trocar produto' },
+  slot_swap_with: { cls: 'bg-purple-100 text-purple-800', emoji: '↔️', label: 'slot invertido' },
+  create_new: { cls: 'bg-blue-100 text-blue-800', emoji: '🆕', label: 'cadastrar novo' },
+  human_review: { cls: 'bg-rose-100 text-rose-800', emoji: '🙋', label: 'precisa decisão' },
+};
 
 function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; categories: string[] }) {
   const data = (d.data ?? {}) as { source?: string; items?: WevertonItem[] };
@@ -182,8 +202,32 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
               const skuMatch = defaultTarget ? matchSku(defaultTarget, skus) : null;
               const isNew = defaultTarget && (!skuMatch || skuMatch.confidence === 'none' || skuMatch.confidence === 'low');
               const willSwap = defaultTarget && !it.skip;
+              const llm = it.llmReview;
+              const llmBadge = llm ? LLM_ACTION_BADGE[llm.recommendedAction] : null;
               return (
                 <div key={i} className={`rounded border ${it.skip ? 'border-navy/10 bg-navy/5 opacity-50' : willSwap ? 'border-amber-300 bg-amber-50/40' : 'border-navy/15 bg-white'} p-2`}>
+                  {/* 🤖 LLM review banner (quando houve análise da Haiku) */}
+                  {llm && llmBadge && (
+                    <div className={`mb-2 rounded px-2 py-1 text-[11px] ${llmBadge.cls}`}>
+                      <div className="flex items-baseline justify-between gap-2">
+                        <strong>
+                          {llmBadge.emoji} 🤖 {llmBadge.label}
+                          {' '}
+                          <span className="font-mono text-[10px] opacity-70">({llm.confidence}%)</span>
+                        </strong>
+                        {llm.swapWithSlot && (
+                          <span className="font-mono text-[10px]">com slot {llm.swapWithSlot}</span>
+                        )}
+                      </div>
+                      <div className="mt-0.5 text-[10px] opacity-90">{llm.reasoning}</div>
+                      {llm.targetSkuName && (
+                        <div className="mt-0.5 text-[10px]">
+                          → sugere: <strong>{llm.targetSkuName}</strong>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-12 items-center gap-2 text-[11px]">
                     <div className="col-span-1 font-mono text-base font-semibold text-navy">{it.slotPosition?.padStart(2, '0')}</div>
                     <div className="col-span-3 text-navy/70">

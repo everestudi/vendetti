@@ -15,6 +15,7 @@ import { prisma } from '../db';
 import { sendText } from '../zapi/send';
 import { getSecret } from '../secrets';
 import { dispatchWorkflow } from '../infra/gh-dispatch';
+import { reviewWevertonItemsWithLLM, type LLMItemReview } from './llm-review';
 
 export interface ParsedItem {
   slotPosition: string;
@@ -109,6 +110,20 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
     return { ok: false, reason: 'parser não achou items' };
   }
 
+  // 🤖 LLM review: pra items non-high, Claude Haiku analisa considerando o
+  // mapa COMPLETO de slots + catálogo + correções recentes. Detecta casos
+  // que o F1 não pega: slot-swap (Vendtef invertido vs físico), alias de
+  // produto, variantes de família, etc.
+  const llmResult = await reviewWevertonItemsWithLLM(items);
+  const reviewsBySlot = new Map<string, LLMItemReview>();
+  for (const r of llmResult.reviews) reviewsBySlot.set(r.slotPosition, r);
+
+  // Anota cada item com a revisão da LLM (se houve)
+  const itemsWithLLM = items.map((it) => ({
+    ...it,
+    llmReview: reviewsBySlot.get(it.slotPosition) ?? null,
+  }));
+
   // Cria Decision PENDING — Luís aprova em /decisions
   const totalUnits = items.reduce((s, i) => s + i.qty, 0);
   const summary = `Reposição Weverton: ${items.length} slot(s) · ${totalUnits} unidades`;
@@ -117,10 +132,21 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
     `"${text.slice(0, 400)}${text.length > 400 ? '...' : ''}"`,
     ``,
     `Items extraídos:`,
-    ...items.map(
-      (it) =>
-        `  · slot ${it.slotPosition.padStart(2, '0')} · ${it.qty}× · ${it.productGuess.slice(0, 40)} (match: ${it.matchConfidence}${it.slotProduct ? ` → ${it.slotProduct}` : ''})`,
-    ),
+    ...itemsWithLLM.map((it) => {
+      const base = `  · slot ${it.slotPosition.padStart(2, '0')} · ${it.qty}× · ${it.productGuess.slice(0, 40)} (match: ${it.matchConfidence}${it.slotProduct ? ` → ${it.slotProduct}` : ''})`;
+      if (it.llmReview) {
+        return `${base}\n    🤖 ${it.llmReview.recommendedAction} (${it.llmReview.confidence}%): ${it.llmReview.reasoning.slice(0, 140)}`;
+      }
+      return base;
+    }),
+    ...(llmResult.ok && llmResult.reviews.length > 0
+      ? [
+          '',
+          `🤖 LLM revisou ${llmResult.reviews.length} item(ns) ambíguo(s) (Haiku 4.5).`,
+        ]
+      : llmResult.error
+        ? ['', `⚠️ LLM review falhou: ${llmResult.error}`]
+        : []),
     ...(warnings.length > 0 ? ['', ...warnings.map((w) => `⚠️ ${w}`)] : []),
   ].join('\n');
 
@@ -134,8 +160,20 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
         source: 'weverton-group',
         messageId: messageId ?? null,
         rawMessage: text.slice(0, 2000),
-        items,
+        items: itemsWithLLM,
         totalUnits,
+        llmReviewSummary: llmResult.ok
+          ? {
+              count: llmResult.reviews.length,
+              actions: llmResult.reviews.reduce(
+                (acc, r) => {
+                  acc[r.recommendedAction] = (acc[r.recommendedAction] ?? 0) + 1;
+                  return acc;
+                },
+                {} as Record<string, number>,
+              ),
+            }
+          : { error: llmResult.error },
       } as unknown as object,
       status: 'PENDING',
     },
