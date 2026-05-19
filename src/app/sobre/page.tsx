@@ -62,7 +62,7 @@ export default function SobrePage() {
       </nav>
 
       {/* HERO */}
-      <section className="mb-12">
+      <section className="mb-8">
         <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold">
           inspirado no Project Vend · Anthropic
         </div>
@@ -75,6 +75,50 @@ export default function SobrePage() {
           de campo (browser headless logando no ERP), oversight automático e orquestração — tudo
           rodando em produção numa máquina FLEX COMBO 6G no Blue Mall Rondon, Uberlândia.
         </p>
+      </section>
+
+      {/* HOJE → AMANHÃ · estado do projeto */}
+      <section className="mb-12 rounded-2xl border-2 border-gold/50 bg-gradient-to-br from-gold-50/60 to-white p-6">
+        <div className="mb-3 text-xs font-bold uppercase tracking-widest text-gold-900">
+          onde tô agora · pra onde quero ir
+        </div>
+        <div className="grid gap-5 md:grid-cols-2">
+          <div>
+            <h3 className="text-base font-bold text-navy">📍 Hoje · entender a relação humana</h3>
+            <p className="mt-2 text-sm leading-relaxed text-navy/80">
+              O foco da etapa atual é <strong>garantir que todo processo passa por aqui</strong> — cada
+              compra, cada reclamação, cada reposição, cada ajuste no estoque. Já trazendo
+              <strong> automatizações concretas</strong> que reduzem trabalho manual: foto da NF-e
+              vira entrada de estoque sozinha, mensagem do zelador no WhatsApp vira reposição
+              sincronizada no ERP, reclamação do cliente vira ticket organizado.
+            </p>
+            <p className="mt-2 text-sm leading-relaxed text-navy/80">
+              Estou aprendendo onde o humano realmente precisa estar (decisões de margem, aprovação
+              de gasto, casos edge) e onde a IA já pode tomar conta sem perguntar.
+            </p>
+          </div>
+          <div>
+            <h3 className="text-base font-bold text-navy">🚀 Meta · IA decidindo sozinha</h3>
+            <p className="mt-2 text-sm leading-relaxed text-navy/80">
+              Eventualmente quero que a IA <strong>tome decisões sozinha</strong> nas áreas onde tiver
+              evidência suficiente:
+            </p>
+            <ul className="mt-2 space-y-1 text-sm text-navy/80">
+              <li>· <strong>Mix de produtos</strong> · decide qual SKU entra/sai por slot baseado em vendas + margem</li>
+              <li>· <strong>Pricing dinâmico</strong> · ajusta preço por horário/dia/sazonalidade pra maximizar lucro</li>
+              <li>· <strong>Compras direto com fornecedores</strong> · negocia, fecha pedido, agenda entrega</li>
+              <li>· <strong>Operação proativa</strong> · avisa o zelador antes do produto acabar</li>
+            </ul>
+          </div>
+        </div>
+        <div className="mt-5 rounded-lg border border-emerald-300 bg-emerald-50/40 p-3 text-sm leading-relaxed text-navy/85">
+          <strong className="text-emerald-900">🔒 Diferença real vs Project Vend (Anthropic):</strong>{' '}
+          Lá os funcionários do escritório <em>brincavam</em> com o Claudius — pediam descontos
+          impossíveis, ofereciam acordos fake, tentavam quebrar o sistema. Aqui isso{' '}
+          <strong>não dá</strong>: o cliente é anônimo na máquina física, paga PIX/cartão via PagBank,
+          recebe o produto e vai embora. Não tem interface de "negociação". O sistema fica livre pra
+          focar no que importa: operar bem com margem saudável.
+        </div>
       </section>
 
       {/* ARQUITETURA · 3 CAMADAS */}
