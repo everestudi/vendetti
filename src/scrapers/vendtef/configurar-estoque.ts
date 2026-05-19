@@ -426,28 +426,51 @@ export async function configurarProdutoNoEstoque(
     await fillTriplet();
     await page.screenshot({ path: `${OUT_DIR}/${slug}-06-limites.png`, fullPage: true });
 
-    // 8. Salvar — scoped ao MODAL TOPMOST (o do "Adicionar Produto ao estoque",
-    // que tá empilhado sobre o modal "Produtos Configurados"). O selector
-    // .first() global pegava errado.
-    const topModal = page.locator('.modal:visible, .modal-dialog:visible').last();
-    const saveBtn = topModal
-      .locator('button, input[type="submit"]')
+    // 8. Salvar — scoped ao modal "Adicionar Produto ao estoque" pelo TÍTULO.
+    // .last() pegava o modal pai "Produtos Configurados" (que tem só × + Fechar).
+    // Por título é unambíguo.
+    const innerModal = page
+      .locator('.modal:visible, .modal-dialog:visible')
+      .filter({ has: page.locator('.modal-title, h4').filter({ hasText: /adicionar\s+produto/i }) })
+      .first();
+    const innerCount = await innerModal.count();
+    if (innerCount === 0) {
+      // Fallback: lista todos modais visíveis pra debug
+      const visibleModals = await page.evaluate(() =>
+        Array.from(document.querySelectorAll('.modal, .modal-dialog'))
+          .filter((m) => (m as HTMLElement).offsetParent !== null)
+          .map((m) => ({
+            tag: m.tagName.toLowerCase(),
+            className: (m as HTMLElement).className.slice(0, 80),
+            title: m.querySelector('.modal-title, h4')?.textContent?.trim() ?? '',
+            buttonCount: m.querySelectorAll('button, input[type="submit"]').length,
+          })),
+      );
+      writeFileSync(`${OUT_DIR}/${slug}-06b-no-inner-modal.json`, JSON.stringify(visibleModals, null, 2));
+      return { ok: false, error: 'modal "Adicionar Produto" não achado · ver -06b-no-inner-modal.json' };
+    }
+
+    const saveBtn = innerModal
+      .locator('button, input[type="submit"], input[type="button"]')
       .filter({ hasText: /^\s*salvar\s*$/i })
       .first();
     if ((await saveBtn.count()) === 0) {
-      // Fallback: tenta achar pelo ID/name
-      const fallback = topModal.locator('#save, input[name="save"]').first();
+      // Fallback por ID/name (em caso de input com value="Salvar")
+      const fallback = innerModal
+        .locator('#save, input[name="save"], input[value="Salvar"], input[value*="alvar"]')
+        .first();
       if ((await fallback.count()) === 0) {
-        const modalBtns = await topModal.evaluate((m) =>
-          Array.from(m.querySelectorAll('button, input[type="submit"]')).map((el) => ({
+        const modalBtns = await innerModal.evaluate((m) =>
+          Array.from(m.querySelectorAll('button, input[type="submit"], input[type="button"]')).map((el) => ({
             tag: el.tagName.toLowerCase(),
             text: (el.textContent ?? '').trim().slice(0, 40) || (el as HTMLInputElement).value,
+            type: (el as HTMLInputElement).type,
             id: (el as HTMLElement).id,
             className: (el as HTMLElement).className.slice(0, 60),
           })),
         );
         writeFileSync(`${OUT_DIR}/${slug}-06b-no-save.json`, JSON.stringify(modalBtns, null, 2));
-        return { ok: false, error: 'botão Salvar não achado no modal · ver -06b-no-save.json' };
+        return { ok: false, error: 'botão Salvar não achado no modal inner · ver -06b-no-save.json' };
       }
       await fallback.click({ force: true });
     } else {
