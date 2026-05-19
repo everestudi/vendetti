@@ -27,7 +27,9 @@ export function Header() {
 
   useEffect(() => setGearOpen(false), [pathname]);
 
-  if (pathname === '/login') return null;
+  // Páginas públicas (sem login) não mostram Header — evita confundir visitante
+  // externo com botões de "Sair", chat etc que ele não tem acesso.
+  if (pathname === '/login' || pathname === '/sobre') return null;
 
   const isCeoActive =
     pathname === '/vendetti' || pathname === '/chat' || pathname === '/decisions' || pathname === '/monitor';

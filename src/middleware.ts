@@ -3,6 +3,7 @@ import { SESSION_COOKIE_NAME, verifySessionCookie } from '@/lib/session';
 
 const PUBLIC_PREFIXES = [
   '/login',
+  '/sobre', // página pública pra compartilhar — não tem ação, só info do projeto
   '/api/health',
   '/api/webhook',
   '/api/cron',

@@ -15,16 +15,32 @@ const COLOR_RING: Record<Agent['color'], string> = {
 export default function SobrePage() {
   return (
     <main className="mx-auto max-w-4xl px-4 py-10">
+      {/* Header próprio (página pública — sem o Header global) */}
+      <nav className="mb-8 flex items-center justify-between">
+        <div className="font-bold text-navy">Vendetti</div>
+        <a
+          href="https://github.com/everestudi/vendetti"
+          target="_blank"
+          rel="noopener"
+          className="text-xs text-navy/55 hover:text-navy"
+        >
+          ↗ código aberto no GitHub
+        </a>
+      </nav>
+
       {/* HERO */}
       <section className="mb-10">
         <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold">
           inspirado no Project Vend · Anthropic
         </div>
-        <h1 className="text-4xl font-bold leading-tight text-navy lg:text-5xl">Sobre o Vendetti</h1>
+        <h1 className="text-4xl font-bold leading-tight text-navy lg:text-5xl">Vendetti · CEO IA</h1>
+        <p className="mt-1 text-lg font-medium text-navy/75">
+          Um time de 6 agentes Claude operando uma vending machine real.
+        </p>
         <p className="mt-3 text-lg text-navy/70">
-          Um time de 6 agentes (Claude Opus 4.7 + Haiku 4.5) operando uma vending machine FLEX COMBO 6G no
-          Blue Mall Rondon: análise de dados, compras, atendimento, operações de campo, oversight e
-          orquestração.
+          Análise de dados, compras (com leitura de NF-e por foto), atendimento via WhatsApp, operações
+          de campo (browser headless logando no ERP), oversight automático e orquestração — tudo
+          rodando em produção numa máquina FLEX COMBO 6G no Blue Mall Rondon, Uberlândia.
         </p>
       </section>
 
