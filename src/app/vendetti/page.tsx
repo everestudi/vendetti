@@ -259,52 +259,74 @@ function PendingCard({ d }: { d: Decision }) {
       {needsRichEditor ? (
         <div className="mt-3 rounded-lg border border-amber-300 bg-white p-3">
           <p className="text-xs text-navy/75">
-            ⚠️ Essa Decision tem 12 slots — precisa revisar item por item (qty, troca de produto,
-            cadastro novo). Abre em <strong>/decisions</strong> que tem o editor completo:
+            ⚠️ Decision com múltiplos slots — precisa revisar item por item. Abre em{' '}
+            <strong>/decisions</strong> que tem o editor completo:
           </p>
-          <div className="mt-2 flex gap-2">
+          <div className="mt-2 flex flex-wrap items-start gap-3">
             <a
               href="/decisions"
               className="rounded bg-navy px-3 py-1.5 text-sm font-semibold text-white hover:bg-navy-900"
             >
-              📝 Revisar items em /decisions →
+              📝 Revisar items →
             </a>
-            <form action={rejectDecision} className="flex items-center gap-2">
-              <input type="hidden" name="id" value={d.id} />
-              <input
-                type="text"
-                name="reason"
-                placeholder="motivo (opcional)"
-                className="rounded border border-navy/20 px-2 py-1 text-xs"
-              />
-              <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
-                ✗ Rejeitar
-              </button>
-            </form>
+            <RejectForm decisionId={d.id} />
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex flex-wrap items-start gap-3">
           <form action={approveDecision.bind(null, d.id)}>
             <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
               ✓ Aprovar
             </button>
           </form>
-          <form action={rejectDecision} className="flex items-center gap-2">
-            <input type="hidden" name="id" value={d.id} />
-            <input
-              type="text"
-              name="reason"
-              placeholder="motivo (opcional)"
-              className="rounded border border-navy/20 px-2 py-1 text-xs"
-            />
-            <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
-              ✗ Rejeitar
-            </button>
-          </form>
+          <RejectForm decisionId={d.id} />
         </div>
       )}
     </article>
+  );
+}
+
+/** Form de rejeição com motivo obrigatório (categoria + texto). Evento vai pra Zelda. */
+function RejectForm({ decisionId }: { decisionId: string }) {
+  return (
+    <details className="flex-1 min-w-[280px] rounded border border-rose-200 bg-rose-50/40">
+      <summary className="cursor-pointer px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50/80">
+        ✗ Rejeitar (precisa motivo)
+      </summary>
+      <form action={rejectDecision} className="space-y-2 border-t border-rose-200 p-3">
+        <input type="hidden" name="id" value={decisionId} />
+        <select
+          name="reasonCategory"
+          required
+          defaultValue=""
+          className="w-full rounded border border-rose-300 px-2 py-1 text-xs"
+        >
+          <option value="" disabled>
+            por quê? (obrigatório)
+          </option>
+          <option value="match-errado">Match com produto errado</option>
+          <option value="produto-inexistente">Produto não existe</option>
+          <option value="qty-errada">Quantidade errada</option>
+          <option value="slot-errado">Slot errado</option>
+          <option value="duplicada">Decision duplicada</option>
+          <option value="dados-insuficientes">Faltam dados</option>
+          <option value="momento-errado">Vou fazer depois</option>
+          <option value="outro">Outro</option>
+        </select>
+        <input
+          type="text"
+          name="reasonText"
+          placeholder="detalhes (opcional, ajuda Zelda)"
+          className="w-full rounded border border-rose-300 px-2 py-1 text-xs"
+        />
+        <button
+          type="submit"
+          className="w-full rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700"
+        >
+          ✗ Rejeitar
+        </button>
+      </form>
+    </details>
   );
 }
 

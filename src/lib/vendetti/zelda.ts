@@ -127,6 +127,15 @@ export async function auditMatchCorrections(opts: {
     if (lastAudit) cutoff = lastAudit.startedAt;
   }
 
+  // Pega TAMBÉM decisions rejeitadas — sinal forte de que o sistema propôs
+  // algo errado. Quando Luís rejeita 3+ do mesmo motivo, Zelda detecta pattern.
+  // Esses eventos viram pseudo-correções pra o LLM analisar junto.
+  const rejectedDecisions = await prisma.workerRun.findMany({
+    where: { name: 'decision_rejected', startedAt: { gte: cutoff } },
+    orderBy: { startedAt: 'desc' },
+    take: 20,
+  });
+
   // 1. Busca correções recentes (após cutoff, max N)
   const corrections = await prisma.workerRun.findMany({
     where: {
@@ -137,7 +146,7 @@ export async function auditMatchCorrections(opts: {
     take: limit,
   });
 
-  if (corrections.length === 0) {
+  if (corrections.length === 0 && rejectedDecisions.length === 0) {
     return {
       ok: true,
       findings: [],
@@ -174,6 +183,20 @@ export async function auditMatchCorrections(opts: {
     };
   });
 
+  // Decisions rejeitadas viram pseudo-correções — alimenta o mesmo prompt
+  // com contexto: kind, reason category, summary.
+  const rejectedEvents = rejectedDecisions.map((c) => {
+    const m = (c.meta ?? {}) as Record<string, unknown>;
+    return {
+      capturedAt: c.startedAt.toISOString(),
+      context: 'decision-rejected',
+      decisionKind: String(m.decisionKind ?? '?'),
+      decisionSummary: String(m.decisionSummary ?? ''),
+      reasonCategory: String(m.reasonCategory ?? '?'),
+      reasonText: String(m.reasonText ?? ''),
+    };
+  });
+
   // Annotação pro modelo: substitui actualSkuId pelo nome real (mais útil)
   const enriched = events.map((e) => ({
     ...e,
@@ -187,10 +210,16 @@ export async function auditMatchCorrections(opts: {
   }
   const anthropic = new Anthropic({ apiKey });
 
-  const userPrompt = `Aqui estão ${enriched.length} correções de match. Identifique padrões e proponha fixes.
+  const userPrompt = `Aqui estão ${enriched.length} correções de match e ${rejectedEvents.length} decisions REJEITADAS pelo Luís. Identifique padrões e proponha fixes.
 
+CORREÇÕES DE MATCH:
 \`\`\`json
 ${JSON.stringify(enriched, null, 2)}
+\`\`\`
+
+DECISIONS REJEITADAS (sinal mais forte — Luís ativamente disse 'errado'):
+\`\`\`json
+${JSON.stringify(rejectedEvents, null, 2)}
 \`\`\`
 
 Retorne APENAS o JSON array de findings (sem markdown, sem prefixo).`;

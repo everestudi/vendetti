@@ -23,11 +23,46 @@ export async function approveDecision(id: string) {
 
 export async function rejectDecision(formData: FormData) {
   const id = String(formData.get('id') ?? '');
-  const reason = String(formData.get('reason') ?? '');
+  const reasonCategory = String(formData.get('reasonCategory') ?? '').trim();
+  const reasonText = String(formData.get('reasonText') ?? '').trim();
+
+  // Motivo OBRIGATÓRIO — categoria + texto livre
+  if (!reasonCategory) {
+    console.warn('[rejectDecision] sem categoria — abortando');
+    return;
+  }
+
+  // Concatena categoria + texto livre pra rejectReason
+  const fullReason = reasonText ? `[${reasonCategory}] ${reasonText}` : `[${reasonCategory}]`;
+
+  const dec = await prisma.decision.findUnique({ where: { id } });
+  if (!dec) return;
+
   await prisma.decision.update({
     where: { id },
-    data: { status: 'REJECTED', rejectedBy: 'admin', rejectReason: reason || null },
+    data: { status: 'REJECTED', rejectedBy: 'admin', rejectReason: fullReason },
   });
+
+  // 🤖 Envia evento pra Zelda auditar — entender PADRÕES de rejeição.
+  // Se Luís rejeita muitas decisions do mesmo tipo (ex: RESTOCK_TASK com
+  // matcher errado), Zelda detecta e propõe fix.
+  await prisma.workerRun.create({
+    data: {
+      name: 'decision_rejected',
+      status: 'OK',
+      finishedAt: new Date(),
+      meta: {
+        decisionId: id,
+        decisionKind: dec.kind,
+        decisionLevel: dec.level,
+        decisionSummary: dec.summary,
+        reasonCategory,
+        reasonText,
+        rejectedBy: 'admin',
+      } as never,
+    },
+  }).catch((e) => console.warn('[decision_rejected log]', e instanceof Error ? e.message : e));
+
   revalidatePath('/decisions');
 }
 

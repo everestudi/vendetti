@@ -249,12 +249,13 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
                       />
                     </div>
                     <div className="col-span-3">
-                      <label className="block text-[10px] text-navy/45">produto alvo (vazio = sem troca)</label>
+                      <label className="block text-[10px] text-navy/45">produto alvo (digite ou escolha do catálogo)</label>
                       <input
                         type="text"
                         name={`target_${i}`}
                         defaultValue={defaultTarget}
-                        placeholder={confidence === 'high' ? 'sem troca' : it.productGuess ?? ''}
+                        list={`skus-${d.id}`}
+                        placeholder={confidence === 'high' ? 'sem troca · ou escolha do catálogo' : it.productGuess ?? ''}
                         className="w-full rounded border border-navy/20 px-1 py-0.5"
                       />
                     </div>
@@ -348,27 +349,74 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
           <datalist id={`cats-${d.id}`}>
             {categories.map((c) => <option key={c} value={c} />)}
           </datalist>
+          {/* Datalist global de SKUs do catálogo — usado nos inputs target_${i} */}
+          <datalist id={`skus-${d.id}`}>
+            {skus.map((s) => <option key={s.id} value={s.name} />)}
+          </datalist>
         </form>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-2">
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         <form action={approveDecision.bind(null, d.id)}>
           <button className="rounded bg-emerald-600 px-4 py-1.5 text-sm font-semibold text-white hover:bg-emerald-700">
             ✓ Aprovar
           </button>
         </form>
-        <form action={rejectDecision} className="flex items-center gap-2">
-          <input type="hidden" name="id" value={d.id} />
-          <input
-            type="text"
-            name="reason"
-            placeholder="motivo (opcional)"
-            className="rounded border border-navy/20 px-2 py-1 text-xs"
-          />
-          <button className="rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700">
-            ✗ Rejeitar
-          </button>
-        </form>
+
+        {/* Rejeitar com motivo OBRIGATÓRIO (categoria + texto livre).
+            Evento gravado pra Zelda auditar padrões de rejeição. */}
+        <details className="flex-1 min-w-[300px] rounded border border-rose-200 bg-rose-50/40">
+          <summary className="cursor-pointer px-3 py-1.5 text-sm font-semibold text-rose-700 hover:bg-rose-50/80">
+            ✗ Rejeitar (precisa motivo)
+          </summary>
+          <form action={rejectDecision} className="space-y-2 border-t border-rose-200 p-3">
+            <input type="hidden" name="id" value={d.id} />
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-rose-900/65">
+                Por quê? <span className="text-rose-600">*</span>
+              </label>
+              <select
+                name="reasonCategory"
+                required
+                defaultValue=""
+                className="mt-0.5 w-full rounded border border-rose-300 px-2 py-1 text-xs"
+              >
+                <option value="" disabled>
+                  selecione...
+                </option>
+                <option value="match-errado">Match com produto errado</option>
+                <option value="produto-inexistente">Produto não existe (ou erro de leitura)</option>
+                <option value="qty-errada">Quantidade errada</option>
+                <option value="slot-errado">Slot reportado errado</option>
+                <option value="duplicada">Decision duplicada</option>
+                <option value="dados-insuficientes">Faltam dados pra decidir</option>
+                <option value="momento-errado">Não é o momento (vai fazer depois)</option>
+                <option value="outro">Outro motivo</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-[10px] font-semibold uppercase tracking-wide text-rose-900/65">
+                Detalhes (opcional, ajuda a Zelda)
+              </label>
+              <input
+                type="text"
+                name="reasonText"
+                placeholder="ex: matcher confundiu Crisp com Delicious"
+                className="mt-0.5 w-full rounded border border-rose-300 px-2 py-1 text-xs"
+              />
+            </div>
+            <p className="text-[10px] text-rose-900/65">
+              ℹ️ O motivo vai pra Zelda investigar padrões. Se você rejeita muitas decisions do mesmo
+              tipo, Zelda detecta e propõe fix.
+            </p>
+            <button
+              type="submit"
+              className="w-full rounded bg-rose-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-rose-700"
+            >
+              ✗ Rejeitar Decision
+            </button>
+          </form>
+        </details>
       </div>
     </article>
   );
