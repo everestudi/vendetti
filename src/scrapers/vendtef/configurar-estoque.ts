@@ -12,7 +12,7 @@
  * Usado idempotentemente: se já tá configurado, retorna ok sem erro.
  */
 
-import type { BrowserContext } from 'playwright';
+import type { BrowserContext, Page } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dismissModals } from '../_shared/playwright';
 
@@ -59,7 +59,9 @@ export async function configurarProdutoNoEstoque(
   const critico = opts.critico ?? 1;
   const slug = `${normalize(estoqueName).slice(0, 12).replace(/ /g, '-')}_${normalize(productName).slice(0, 24).replace(/ /g, '-')}`;
 
-  const page = await ctx.newPage();
+  // Mutável porque pode mudar pra nova aba quando Vendtef abre Produtos
+  // Configurados em target=_blank
+  let page: Page = await ctx.newPage();
   page.setDefaultTimeout(30_000);
 
   try {
@@ -101,13 +103,43 @@ export async function configurarProdutoNoEstoque(
       return { ok: false, error: '"Produtos Configurados" não achado na row · ver -01-no-link.json' };
     }
 
+    // Dump das propriedades do link pra debug
+    const linkAttrs = await configLink.evaluate((el) => ({
+      href: el.getAttribute('href'),
+      target: el.getAttribute('target'),
+      onclick: el.getAttribute('onclick'),
+      dataAttrs: Object.fromEntries(
+        Array.from((el as HTMLElement).attributes).filter((a) => a.name.startsWith('data-')).map((a) => [a.name, a.value]),
+      ),
+      className: (el as HTMLElement).className,
+      outerHTML: (el as HTMLElement).outerHTML.slice(0, 500),
+    }));
+    writeFileSync(`${OUT_DIR}/${slug}-02a-link.json`, JSON.stringify(linkAttrs, null, 2));
+    console.log(`    link attrs: target=${linkAttrs.target} href=${linkAttrs.href?.slice(0, 60)} onclick=${linkAttrs.onclick?.slice(0, 80)}`);
+
     // Captura URL antes pra detectar navegação
     const urlBefore = page.url();
+    const ctx = page.context();
+    const opensNewTab =
+      linkAttrs.target === '_blank' ||
+      Boolean(linkAttrs.onclick && /window\.open|target.*_blank/i.test(linkAttrs.onclick));
 
-    // Tenta navegação direta via href se disponível (mais confiável que click)
-    const href = await configLink.getAttribute('href');
-    if (href && href.startsWith('http') && !href.includes('javascript:')) {
-      await page.goto(href, { waitUntil: 'domcontentloaded' });
+    let targetPage: Page = page;
+    if (opensNewTab) {
+      // Vendtef abre em nova aba — escuta o evento + troca de page
+      const newPagePromise = ctx.waitForEvent('page', { timeout: 10_000 });
+      await configLink.click({ force: true });
+      try {
+        targetPage = await newPagePromise;
+        await targetPage.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined);
+        console.log(`    ✓ aba nova aberta: ${targetPage.url()}`);
+      } catch (e) {
+        return { ok: false, error: `link era target=_blank mas aba nova não abriu: ${e instanceof Error ? e.message : e}` };
+      }
+    } else if (linkAttrs.href && linkAttrs.href.startsWith('http') && !linkAttrs.href.includes('javascript:')) {
+      // Navegação direta via href absoluto
+      await page.goto(linkAttrs.href, { waitUntil: 'domcontentloaded' });
+      targetPage = page;
     } else {
       // Click + aguarda mudança de URL ou load. Usa force=true pq botões
       // do Vendtef podem ter overlay/animation issues.
@@ -115,27 +147,31 @@ export async function configurarProdutoNoEstoque(
         page.waitForLoadState('domcontentloaded', { timeout: 15_000 }).catch(() => undefined),
         configLink.click({ force: true, timeout: 5_000 }),
       ]);
+      targetPage = page;
     }
-    await page.waitForTimeout(1_500);
-    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
-    await dismissModals(page);
-    await page.screenshot({ path: `${OUT_DIR}/${slug}-02-produtos-config.png`, fullPage: true });
+    await targetPage.waitForTimeout(1_500);
+    await targetPage.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await dismissModals(targetPage);
+    await targetPage.screenshot({ path: `${OUT_DIR}/${slug}-02-produtos-config.png`, fullPage: true });
 
-    // VERIFICA que navegamos pra página correta. Se URL não mudou OU
-    // título não bate, NÃO continua — evita seguir cego e clicar no
-    // "+ Adicionar" do header (que cria novo estoque, não produto).
-    const urlAfter = page.url();
-    const pageTitle = await page.title();
-    if (urlAfter === urlBefore || /adicionar.*estoque/i.test(pageTitle)) {
+    // VERIFICA que estamos na página correta
+    const urlAfter = targetPage.url();
+    const pageTitle = await targetPage.title();
+    if ((urlAfter === urlBefore && targetPage === page) || /adicionar.*estoque/i.test(pageTitle)) {
       writeFileSync(
         `${OUT_DIR}/${slug}-02-no-navigation.json`,
-        JSON.stringify({ urlBefore, urlAfter, pageTitle }, null, 2),
+        JSON.stringify({ urlBefore, urlAfter, pageTitle, linkAttrs }, null, 2),
       );
       return {
         ok: false,
         error: `click em "Produtos Configurados" não navegou (url=${urlAfter}, title=${pageTitle}). Ver -02-no-navigation.json`,
       };
     }
+
+    // Daqui pra frente, usa `targetPage` (pode ser nova aba) em vez de `page`.
+    // Re-aliasa pra simplificar — todas as operações subsequentes no script
+    // usam `page` como variável local desta function-scope.
+    page = targetPage;
 
     // 3. Pre-check: produto já está na lista?
     const targetTokens = normalize(productName).split(' ').filter((t) => t.length >= 3).slice(0, 4);
