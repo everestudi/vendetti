@@ -21,9 +21,11 @@ const ESTOQUES_URL = 'https://www.erpvending.com.br/erp/estoques';
 
 export interface EverestRow {
   productName: string;
-  qty: number;
+  productCode?: string; // código Vendtef pra cross-ref com Acompanhamento
+  qty: number; // saldo atual (vem de Acompanhamento). 0 se não capturado.
   alerta: number;
   critico: number;
+  estoqueMaximo: number; // capacity
   status?: string;
 }
 
@@ -129,8 +131,10 @@ async function openEverestProdutosConfigurados(page: Page): Promise<{ ok: boolea
   return { ok: true, modalPage: target };
 }
 
+/** Captura LIMITS (config) do modal Produtos Configurados.
+ *  Headers: Produto · Código · Qtde Crítica · Qtde Alerta · Estoque Máximo.
+ *  NÃO retorna saldo atual — pra isso ver extractSaldoFromAcompanhamento. */
 async function extractRowsFromModal(page: Page): Promise<EverestRow[]> {
-  // Tabela #produtos dentro do modal. Headers: Produto, Código, Atual, Alerta, Crítico (assumido)
   return page.evaluate(() => {
     // `:visible` é jQuery, não CSS válido — usa filter manual via offsetParent
     const visibleModal = Array.from(document.querySelectorAll('.modal, .modal-dialog')).find((m) => {
@@ -140,7 +144,6 @@ async function extractRowsFromModal(page: Page): Promise<EverestRow[]> {
     });
     let trList: HTMLTableRowElement[] = [];
     if (visibleModal) {
-      // Primeiro tenta table#produtos especificamente; fallback pra qualquer table
       const produtosTable = visibleModal.querySelector('table#produtos');
       const targetTable = (produtosTable ?? visibleModal.querySelector('table')) as HTMLTableElement | null;
       if (targetTable) {
@@ -154,11 +157,12 @@ async function extractRowsFromModal(page: Page): Promise<EverestRow[]> {
     };
     return trList.map((tr) => {
       const cells = Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
+      // Layout: [0]=Produto, [1]=Código, [2]=Qtde Crítica, [3]=Qtde Alerta, [4]=Estoque Máximo
       const productName = cells[0] ?? '';
-      // Headers podem ser: Produto | Código | Qtde Atual | Qtde Alerta | Qtde Crítica
-      // OU outra ordem. Vamos pegar os 3 últimos campos numéricos da row como qty, alerta, crítico.
-      const numerics = cells.slice(1).map(parseNumU).filter((n) => !Number.isNaN(n));
-      // Status (se houver classe css indicando)
+      const productCode = cells[1] ?? '';
+      const critico = parseNumU(cells[2] ?? '');
+      const alerta = parseNumU(cells[3] ?? '');
+      const estoqueMaximo = parseNumU(cells[4] ?? '');
       const cls = tr.className.toLowerCase();
       const status = cls.includes('danger') || cls.includes('critico')
         ? 'crítico'
@@ -167,13 +171,91 @@ async function extractRowsFromModal(page: Page): Promise<EverestRow[]> {
           : 'ok';
       return {
         productName,
-        qty: numerics[numerics.length - 3] ?? 0,
-        alerta: numerics[numerics.length - 2] ?? 0,
-        critico: numerics[numerics.length - 1] ?? 0,
+        productCode,
+        qty: 0, // placeholder — preenchido pelo merge com Acompanhamento depois
+        alerta,
+        critico,
+        estoqueMaximo,
         status,
       };
     }).filter((r) => r.productName.length > 1);
   });
+}
+
+/** Captura SALDO ATUAL (qty) da tela "Acompanhamento" do Estoque Everest.
+ *  Link na mesma row da lista de estoques. */
+async function extractSaldoFromAcompanhamento(page: Page): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  try {
+    await page.goto(ESTOQUES_URL, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined);
+    await dismissModals(page);
+    const row = page.locator('tr').filter({ hasText: /estoque\s*everest/i }).first();
+    if ((await row.count()) === 0) {
+      console.warn('  ⚠ Acompanhamento: row Everest não achada');
+      return out;
+    }
+    const link = row.locator('a, button').filter({ hasText: /acompanhamento/i }).first();
+    if ((await link.count()) === 0) {
+      console.warn('  ⚠ Acompanhamento: link não achado');
+      return out;
+    }
+    const ctx = page.context();
+    const newPagePromise = ctx.waitForEvent('page', { timeout: 5_000 }).catch(() => null);
+    await link.click({ force: true });
+    const maybeNewPage = await newPagePromise;
+    const target = maybeNewPage ?? page;
+    await target.waitForLoadState('domcontentloaded', { timeout: 10_000 }).catch(() => undefined);
+    await target.waitForTimeout(2_500);
+    await target.waitForLoadState('networkidle', { timeout: 8_000 }).catch(() => undefined);
+    await target.screenshot({ path: `${OUT_DIR}/05-acompanhamento.png`, fullPage: true }).catch(() => undefined);
+
+    // Captura tabela de acompanhamento (não sei o seletor exato — tenta heurísticas)
+    const rows = await target.evaluate(() => {
+      // Quaisquer tabelas visíveis na page; pega a que tem mais rows + colunas com produto
+      const tables = Array.from(document.querySelectorAll('table')).filter((t) => (t as HTMLElement).offsetParent !== null);
+      const candidates = tables.map((t) => {
+        const rowCount = t.querySelectorAll('tbody tr').length;
+        const headers = Array.from(t.querySelectorAll('thead th')).map((th) => (th.textContent ?? '').trim().toLowerCase());
+        return { table: t, rowCount, headers };
+      });
+      // Prefere tabela com headers tipo "produto" + saldo/qtde
+      const best = candidates.sort((a, b) => b.rowCount - a.rowCount)[0];
+      if (!best) return [];
+
+      // Detecta índice das colunas "Produto" e "Saldo/Qtde"
+      const headers = best.headers;
+      const idxProduto = headers.findIndex((h) => /produto|nome/i.test(h));
+      const idxSaldo = headers.findIndex((h) => /saldo|atual|qtde|estoque/i.test(h));
+
+      const out: Array<{ productName: string; qty: number; allCells: string[]; headers: string[] }> = [];
+      const trs = Array.from(best.table.querySelectorAll('tbody tr'));
+      for (const tr of trs) {
+        const cells = Array.from(tr.querySelectorAll('td')).map((c) => (c.textContent ?? '').trim());
+        if (cells.length < 2) continue;
+        const productName = idxProduto >= 0 ? cells[idxProduto] : cells[0];
+        // Saldo: usa coluna idxSaldo se achou, senão a primeira coluna numérica
+        let qtyStr = idxSaldo >= 0 ? cells[idxSaldo] : '';
+        if (!qtyStr) {
+          for (const c of cells.slice(1)) {
+            if (/\d/.test(c)) { qtyStr = c; break; }
+          }
+        }
+        const qtyMatch = qtyStr.match(/(\d+)/);
+        const qty = qtyMatch ? parseInt(qtyMatch[1], 10) : 0;
+        out.push({ productName, qty, allCells: cells, headers });
+      }
+      return out;
+    });
+    writeFileSync(`${OUT_DIR}/05-acompanhamento-rows.json`, JSON.stringify(rows, null, 2));
+    for (const r of rows) {
+      if (r.productName) out.set(r.productName.toLowerCase().trim(), r.qty);
+    }
+    console.log(`  ✓ Acompanhamento: ${rows.length} rows · ${out.size} saldos capturados`);
+  } catch (e) {
+    console.warn('  ⚠ Acompanhamento falhou:', e instanceof Error ? e.message : e);
+  }
+  return out;
 }
 
 export async function scrapeEverestStock(ctx: BrowserContext): Promise<ScrapeEverestResult> {
@@ -192,21 +274,34 @@ export async function scrapeEverestStock(ctx: BrowserContext): Promise<ScrapeEve
     await target.screenshot({ path: `${OUT_DIR}/02-modal-open.png`, fullPage: true }).catch(() => undefined);
 
     const rows = await extractRowsFromModal(target);
-    writeFileSync(`${OUT_DIR}/03-rows.json`, JSON.stringify(rows, null, 2));
-    console.log(`  ✓ Everest: ${rows.length} produtos capturados`);
+    writeFileSync(`${OUT_DIR}/03-rows-limits.json`, JSON.stringify(rows, null, 2));
+    console.log(`  ✓ Produtos Configurados: ${rows.length} produtos (limits)`);
 
     if (rows.length === 0) {
       return { ok: false, rowsCaptured: 0, matched: 0, unmatched: 0, error: 'zero rows capturadas — possivelmente seletor mudou' };
     }
+
+    // Fecha modal antes de navegar pra Acompanhamento (Esc)
+    await target.keyboard.press('Escape').catch(() => undefined);
+    await target.waitForTimeout(500);
+
+    // Captura saldo atual via Acompanhamento (página separada)
+    const saldoMap = await extractSaldoFromAcompanhamento(target);
+
+    // Merge: cada row de limits + saldo do mesmo produto (lookup case-insensitive)
+    const merged = rows.map((r) => {
+      const saldo = saldoMap.get(r.productName.toLowerCase().trim()) ?? 0;
+      return { ...r, qty: saldo };
+    });
 
     // Match contra catálogo SKU + persiste
     const allSkus = await prisma.sku.findMany({ where: { active: true }, select: { id: true, name: true } });
 
     let matched = 0;
     let unmatched = 0;
-    const matchResults: Array<{ productName: string; matched: string | null; score: number; qty: number; alerta: number; critico: number; status?: string }> = [];
+    const matchResults: Array<{ productName: string; matched: string | null; score: number; qty: number; alerta: number; critico: number; estoqueMaximo: number; status?: string }> = [];
 
-    for (const r of rows) {
+    for (const r of merged) {
       let best: { sku: typeof allSkus[number]; score: number } | null = null;
       for (const s of allSkus) {
         const score = similarity(r.productName, s.name);
@@ -221,6 +316,7 @@ export async function scrapeEverestStock(ctx: BrowserContext): Promise<ScrapeEve
         qty: r.qty,
         alerta: r.alerta,
         critico: r.critico,
+        estoqueMaximo: r.estoqueMaximo,
         status: r.status,
       });
       if (!best) {
@@ -228,6 +324,9 @@ export async function scrapeEverestStock(ctx: BrowserContext): Promise<ScrapeEve
         continue;
       }
       matched++;
+      // Recalcula status com base na qty + limits:
+      // crítico se qty <= critico, alerta se qty <= alerta, ok caso contrário
+      const computedStatus = r.qty <= r.critico ? 'crítico' : r.qty <= r.alerta ? 'alerta' : 'ok';
       // Upsert EverestStock
       await prisma.everestStock.upsert({
         where: { skuId: best.sku.id },
@@ -236,21 +335,21 @@ export async function scrapeEverestStock(ctx: BrowserContext): Promise<ScrapeEve
           qty: r.qty,
           alerta: r.alerta,
           critico: r.critico,
-          status: r.status,
+          status: computedStatus,
         },
         update: {
           qty: r.qty,
           alerta: r.alerta,
           critico: r.critico,
-          status: r.status,
+          status: computedStatus,
           capturedAt: new Date(),
         },
       });
     }
     writeFileSync(`${OUT_DIR}/04-match-result.json`, JSON.stringify(matchResults, null, 2));
-    console.log(`  ✓ Everest match: ${matched} ok, ${unmatched} sem match`);
+    console.log(`  ✓ Everest match: ${matched} ok, ${unmatched} sem match · com saldo de Acompanhamento`);
 
-    return { ok: true, rowsCaptured: rows.length, matched, unmatched };
+    return { ok: true, rowsCaptured: merged.length, matched, unmatched };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     await page.screenshot({ path: `${OUT_DIR}/error.png`, fullPage: true }).catch(() => undefined);
