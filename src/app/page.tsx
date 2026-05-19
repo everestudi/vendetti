@@ -4,12 +4,20 @@ import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { SprintProgress } from '@/components/SprintProgress';
 import { IdeasBox } from '@/components/IdeasBox';
+import { HomeDashboard } from '@/components/HomeDashboard';
 import { TEAM, avatarUrl } from '@/lib/agents/team';
+import { getMonthlyRevenueSeries, getSyncStatus, getPendingByAgent } from '@/lib/dashboard';
 
 export const dynamic = 'force-dynamic';
 
 export default async function Home() {
-  const [snap, slots] = await Promise.all([getLatestSnapshot(), getSlotsWithMargin()]);
+  const [snap, slots, revenueSeries, syncStatus, pending] = await Promise.all([
+    getLatestSnapshot(),
+    getSlotsWithMargin(),
+    getMonthlyRevenueSeries(12),
+    getSyncStatus(),
+    getPendingByAgent(),
+  ]);
 
   const capacityPct = snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : 0;
   const critical = snap?.slotsCritical ?? 0;
@@ -17,6 +25,9 @@ export default async function Home() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-10">
+      {/* DASHBOARD OPERACIONAL */}
+      <HomeDashboard revenueSeries={revenueSeries} syncStatus={syncStatus} pending={pending} />
+
       {/* HERO */}
       <section className="mb-8">
         <div className="mb-2 text-xs font-semibold uppercase tracking-widest text-gold">
