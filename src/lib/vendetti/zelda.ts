@@ -54,10 +54,34 @@ SUA TAREFA:
 
 Analisar a lista de correções (cada uma é uma vez que o Luís discordou do matcher) e identificar PADRÕES. Pra cada padrão, propor 1 fix CONCRETO no código.
 
-Tipos de correção:
-- "matcher_missed_should_match": matcher não sugeriu nada, Luís achou manual → matcher tá restritivo demais (faltou NOISE token, threshold alto demais, etc)
-- "matcher_suggested_should_create_new": matcher sugeriu X mas era pra criar produto NOVO → falta um DISCRIMINATOR pra distinguir variantes (ex: novo sabor)
-- "matcher_suggested_wrong_match": matcher sugeriu X mas era Y → discriminator faltando ou ruído atrapalhou
+Tipos de correção (campo "correctionType"):
+- "matcher_missed_should_match": matcher não sugeriu nada na UI Bruno, Luís
+  achou manual → matcher tá restritivo demais (faltou NOISE token, threshold
+  alto demais, etc)
+- "matcher_suggested_should_create_new": matcher sugeriu X mas era pra criar
+  produto NOVO → falta um DISCRIMINATOR pra distinguir variantes (ex: novo
+  sabor)
+- "matcher_suggested_wrong_match": matcher sugeriu X mas era Y → discriminator
+  faltando ou ruído atrapalhou
+- "matcher_missed_in_vendtef_low_score": (context=scraper-vendtef-entrada)
+  Bruno scraper tentou casar produto da NF-e com lista do Vendtef, achou
+  candidato mas score < 60% → mesmo problema (matcher idêntico em
+  scrapers/vendtef/entrada-estoque.ts SIMILARITY)
+- "matcher_missed_in_vendtef_no_candidate": Bruno scraper não achou NENHUM
+  candidato no Vendtef → produto realmente novo OU normalização totalmente
+  diferente. Sugerir cadastro automático é OK.
+
+Contextos (campo "context"):
+- "bruno-nfe": UI de upload da NF-e (Luís corrige na tela). Matcher em
+  src/lib/vendetti/nfe-parse.ts.
+- "scraper-vendtef-entrada": scraper Bruno tentando casar contra catálogo
+  do Vendtef. Matcher em src/scrapers/vendtef/entrada-estoque.ts (similarity).
+- "weverton-restock": fluxo Weverton no /decisions UI. Matcher em src/lib/
+  sku-match.ts.
+
+IMPORTANTE: Os três matchers compartilham as MESMAS constantes
+NOISE_TOKENS e DISCRIMINATORS por design. Quando sugerir fix, peça pro
+Augusto atualizar em TODOS os três arquivos onde aplicar.
 
 Saída: JSON array de findings. Cada finding:
 {
@@ -240,28 +264,32 @@ Retorne APENAS o JSON array de findings (sem markdown, sem prefixo).`;
       persistedFindings.push(f);
     }
 
-    // 5b. Notificar Luís via WhatsApp se há finding importante/crítico.
-    // Sugestões silenciam — só "importante" ou "crítico" tira ele do dia-a-dia.
-    if (notifyLuis) {
-      const noisy = persistedFindings.filter((f) => f.severity === 'importante' || f.severity === 'crítico');
-      if (noisy.length > 0) {
-        const luisPhone = await getSecret('LUIS_PHONE');
-        const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
-        if (luisPhone) {
-          const lines = [
-            `🔍 Zelda detectou ${noisy.length} ponto(s) de melhoria:`,
-            '',
-            ...noisy.slice(0, 3).map((f, i) => {
-              const emoji = f.severity === 'crítico' ? '🔴' : '🟡';
-              return `${emoji} ${f.pattern}\n  fix: ${f.suggestedFix.slice(0, 100)}\n  prompt: ${f.augustoPrompt.slice(0, 180)}`;
-            }),
-            '',
-            `Detalhes: ${base}/equipe/zelda`,
-          ].join('\n');
-          await sendText(luisPhone, lines).catch((e) =>
-            console.warn('[zelda notify]', e instanceof Error ? e.message : e),
-          );
-        }
+    // 5b. Notificar Luís via WhatsApp pra QUALQUER finding nova.
+    // Filosofia: visibilidade total durante desenvolvimento. Luís pediu pra
+    // ver tudo que tá rolando — depois pode filtrar quando o sistema amadurecer.
+    if (notifyLuis && persistedFindings.length > 0) {
+      const luisPhone = await getSecret('LUIS_PHONE');
+      const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
+      if (luisPhone) {
+        const sevEmoji: Record<string, string> = {
+          'crítico': '🔴',
+          'importante': '🟡',
+          'sugestão': '🔵',
+        };
+        const lines = [
+          `🔍 Zelda · ${persistedFindings.length} finding(s) nova(s) (${events.length} correções analisadas)`,
+          '',
+          ...persistedFindings.slice(0, 5).map((f) => {
+            const e = sevEmoji[f.severity] ?? '🔵';
+            return `${e} [${f.severity}] ${f.pattern}\n   fix: ${f.suggestedFix.slice(0, 120)}\n   prompt: ${f.augustoPrompt.slice(0, 200)}`;
+          }),
+          ...(persistedFindings.length > 5 ? [`   ... +${persistedFindings.length - 5} outras`] : []),
+          '',
+          `${base}/equipe/zelda`,
+        ].join('\n');
+        await sendText(luisPhone, lines).catch((e) =>
+          console.warn('[zelda notify]', e instanceof Error ? e.message : e),
+        );
       }
     }
 

@@ -27,7 +27,7 @@ export default async function BrunoPage() {
   const thisMonth = monthRange(now);
   const lastMonth = monthRange(new Date(now.getFullYear(), now.getMonth() - 1, 1));
 
-  const [purchases, monthAgg, lastMonthAgg, supplierAgg, topItems] = await Promise.all([
+  const [purchases, monthAgg, lastMonthAgg, supplierAgg, topItems, latestScraperRun, recentCorrections] = await Promise.all([
     prisma.purchase.findMany({
       orderBy: { occurredAt: 'desc' },
       take: 25,
@@ -55,6 +55,20 @@ export default async function BrunoPage() {
       _sum: { totalCost: true, qty: true },
       orderBy: { _sum: { totalCost: 'desc' } },
       take: 5,
+    }),
+    // Última execução do scraper Vendtef (Bruno) — usado pro painel "live status"
+    prisma.workerRun.findFirst({
+      where: { name: 'vendtef_entrada' },
+      orderBy: { startedAt: 'desc' },
+    }),
+    // Correções de match recentes (auditoria pra Zelda) — últimas 48h
+    prisma.workerRun.findMany({
+      where: {
+        name: 'match_correction',
+        startedAt: { gte: new Date(Date.now() - 48 * 3600 * 1000) },
+      },
+      orderBy: { startedAt: 'desc' },
+      take: 20,
     }),
   ]);
 
@@ -123,6 +137,8 @@ export default async function BrunoPage() {
           sub="no mês"
         />
       </section>
+
+      <ScraperLiveStatus run={latestScraperRun} corrections={recentCorrections} />
 
       <section className="mb-6 grid gap-4 md:grid-cols-2">
         <div className="rounded-lg border border-navy/15 bg-white p-4">
@@ -261,5 +277,133 @@ function Kpi({ label, value, sub }: { label: string; value: string; sub?: string
       <div className="mt-1 text-xl font-semibold text-navy">{value}</div>
       {sub && <div className="mt-1 text-xs text-navy/60">{sub}</div>}
     </div>
+  );
+}
+
+type ScraperRun = Awaited<ReturnType<typeof prisma.workerRun.findFirst>>;
+type CorrectionRun = Awaited<ReturnType<typeof prisma.workerRun.findMany>>[number];
+
+/**
+ * Painel "ao vivo" do Bruno · mostra última execução do scraper Vendtef
+ * (vendtef_entrada): status, duração, link pro GH Action run e correções
+ * de match que ficaram pra Zelda auditar. Atualiza com refresh da página.
+ */
+function ScraperLiveStatus({ run, corrections }: { run: ScraperRun; corrections: CorrectionRun[] }) {
+  if (!run) {
+    return (
+      <section className="mb-6 rounded-lg border border-navy/10 bg-navy/[0.02] p-4 text-xs text-navy/55">
+        ℹ️ Scraper Vendtef (Bruno) ainda não rodou. Sobe uma NF-e em <code>/bruno/nova</code> pra disparar.
+      </section>
+    );
+  }
+  const meta = (run.meta ?? {}) as Record<string, unknown>;
+  const isRunning = run.status === 'RUNNING';
+  const isFailed = run.status === 'FAILED';
+  const isOk = run.status === 'OK';
+  const ageS = Math.round((Date.now() - run.startedAt.getTime()) / 1000);
+  const age = ageS < 60 ? `${ageS}s` : ageS < 3600 ? `${Math.round(ageS / 60)}min` : `${Math.round(ageS / 3600)}h`;
+  const duration = run.finishedAt
+    ? `${Math.round((run.finishedAt.getTime() - run.startedAt.getTime()) / 1000)}s`
+    : '...';
+  const cls = isRunning
+    ? 'border-blue-300 bg-blue-50'
+    : isFailed
+      ? 'border-rose-300 bg-rose-50'
+      : 'border-emerald-300 bg-emerald-50';
+  const icon = isRunning ? '⏳' : isFailed ? '❌' : '✅';
+
+  // Group corrections by type for summary
+  const correctionTypes = corrections.reduce(
+    (acc, c) => {
+      const m = (c.meta ?? {}) as Record<string, unknown>;
+      const type = String(m.correctionType ?? 'unknown');
+      acc[type] = (acc[type] ?? 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
+  return (
+    <section className={`mb-6 rounded-lg border-2 p-4 ${cls}`}>
+      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-sm font-semibold text-navy">
+          {icon} Scraper Vendtef · última execução
+          {isRunning && ` · rodando há ${age}`}
+          {isOk && ` · OK em ${duration}`}
+          {isFailed && ` · FALHOU em ${duration}`}
+        </h2>
+        <a
+          href="https://github.com/everestudi/vendetti/actions/workflows/vendtef-sync.yml"
+          target="_blank"
+          rel="noreferrer"
+          className="text-xs text-navy/60 hover:underline"
+        >
+          📋 logs no GitHub Actions →
+        </a>
+      </header>
+      <div className="space-y-1 text-xs text-navy/75">
+        <div>
+          <span className="text-navy/50">início:</span> {run.startedAt.toLocaleString('pt-BR')} ({age} atrás)
+        </div>
+        {isFailed && run.error && (
+          <details className="mt-1 rounded bg-white p-2">
+            <summary className="cursor-pointer font-medium text-rose-700">erro completo</summary>
+            <pre className="mt-1 overflow-x-auto whitespace-pre-wrap text-[10px] text-rose-900">
+{run.error}
+            </pre>
+          </details>
+        )}
+        {isOk && Object.keys(meta).length > 0 && (
+          <details className="mt-1 rounded bg-white p-2">
+            <summary className="cursor-pointer text-navy/65">meta da execução</summary>
+            <pre className="mt-1 overflow-x-auto text-[10px] text-navy/70">
+{JSON.stringify(meta, null, 2)}
+            </pre>
+          </details>
+        )}
+      </div>
+
+      {corrections.length > 0 && (
+        <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3 text-xs">
+          <div className="mb-2 flex items-baseline justify-between">
+            <strong className="text-amber-900">
+              🧪 {corrections.length} match correction(s) capturadas nas últimas 48h
+            </strong>
+            <Link href="/equipe/zelda" className="text-[10px] text-amber-700 hover:underline">
+              Zelda audita →
+            </Link>
+          </div>
+          <div className="mb-2 flex flex-wrap gap-2 text-[10px]">
+            {Object.entries(correctionTypes).map(([t, n]) => (
+              <span key={t} className="rounded-full bg-white px-2 py-0.5 text-amber-800">
+                {n}× {t.replace(/_/g, ' ')}
+              </span>
+            ))}
+          </div>
+          <div className="space-y-1">
+            {corrections.slice(0, 8).map((c) => {
+              const m = (c.meta ?? {}) as Record<string, unknown>;
+              return (
+                <div key={c.id} className="text-amber-900">
+                  · <span className="font-mono text-[10px] text-amber-700">{String(m.context ?? '?')}</span>{' '}
+                  <span className="font-medium">{String(m.inputText ?? '?').slice(0, 80)}</span>
+                  {m.suggestedSkuName ? (
+                    <span className="text-amber-700/70">
+                      {' '}
+                      → sugerido {String(m.suggestedScore ?? '?')}% {String(m.suggestedSkuName).slice(0, 30)}
+                    </span>
+                  ) : (
+                    <span className="italic text-amber-700/55"> · sem sugestão</span>
+                  )}
+                </div>
+              );
+            })}
+            {corrections.length > 8 && (
+              <div className="text-[10px] italic text-amber-700/60">+{corrections.length - 8} outras…</div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

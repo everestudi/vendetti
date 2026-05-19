@@ -113,23 +113,48 @@ function normalize(s: string): string {
     .trim();
 }
 
+/// Palavras-ruído da NF-e (Atacadão, Assaí) — não ajudam a discriminar.
+/// Mantido em sync com src/lib/sku-match.ts e src/lib/vendetti/nfe-parse.ts.
+const NOISE_TOKENS = new Set([
+  'ref', 'lata', 'sleek', 'und', 'un', 'unid', 'unidade',
+  'emb', 'embal', 'embalagem',
+  'gar', 'garrafa', 'pet', 'pack',
+  'cxa', 'cx', 'caixa', 'fardo',
+  'br', 'nacional', 'naci', 'imp',
+  '1x1', '6x1', '12x1', '24x1',
+  'nfe', 'sa', 'sgl',
+]);
+
 // Tokens que distinguem variantes de produto. Se aparecem só de um lado, é falso match.
 const DISCRIMINATING = [
-  'zero',
-  'diet',
-  'light',
-  'frutas vermelhas',
-  'frutas vermelha',
+  'zero', 'diet', 'light', 'sem',
+  'frutas vermelhas', 'frutas vermelha',
   'mountain blast',
-  'tropical',
-  'morango',
-  'baunilha',
+  'watermelon', 'amora', 'morango', 'baunilha', 'limao',
+  'tropical', 'pipeline', 'mango', 'maracuja',
+  'ultra',
 ];
 
+function meaningfulTokens(name: string): Set<string> {
+  return new Set(
+    normalize(name)
+      .split(' ')
+      .filter((t) => t.length >= 2)
+      .filter((t) => !NOISE_TOKENS.has(t)),
+  );
+}
+
+/**
+ * Similaridade entre nome A (NF-e, com ruído) e B (Vendtef catalog).
+ * Mesmo algoritmo unificado em sku-match.ts e nfe-parse.ts:
+ *   - filter NOISE_TOKENS
+ *   - DISCRIMINATORS: conflito → score 0
+ *   - F1 = 2*P*R / (P+R)
+ */
 function similarity(a: string, b: string): number {
   const na = normalize(a);
   const nb = normalize(b);
-  // Anti-correlação carbonatação: "sem gas" / "s g" / "sg" vs "c gas" / "c g"
+  // Anti-correlação carbonatação: "sem gas" vs "c gas"
   const aSemGas = /\b(sem gas|s g|sg)\b/.test(na);
   const bSemGas = /\b(sem gas|s g|sg)\b/.test(nb);
   const aComGas = /\b(c gas|c g|com gas)\b/.test(na);
@@ -138,18 +163,22 @@ function similarity(a: string, b: string): number {
 
   // Discriminating tokens: presença unilateral derruba score
   for (const tok of DISCRIMINATING) {
-    const inA = na.includes(tok);
-    const inB = nb.includes(tok);
-    if (inA !== inB) return 0;
+    if (na.includes(tok) !== nb.includes(tok)) return 0;
   }
 
-  const ta = new Set(na.split(' ').filter((t) => t.length >= 2));
-  const tb = new Set(nb.split(' ').filter((t) => t.length >= 2));
+  const ta = meaningfulTokens(a);
+  const tb = meaningfulTokens(b);
   if (ta.size === 0 || tb.size === 0) return 0;
+
   let shared = 0;
   for (const t of ta) if (tb.has(t)) shared++;
-  const union = new Set([...ta, ...tb]).size;
-  return Math.round((shared / union) * 100);
+  if (shared === 0) return 0;
+
+  // F1 score: penaliza catálogo genérico vs target específico (e vice-versa)
+  const precision = shared / ta.size;
+  const recall = shared / tb.size;
+  const f1 = (2 * precision * recall) / (precision + recall);
+  return Math.round(f1 * 100);
 }
 
 function bestMatch<T extends { name: string }>(target: string, rows: T[]): { row: T; score: number } | null {
@@ -372,6 +401,33 @@ async function syncOne(ctx: BrowserContext, purchase: PurchaseSnap): Promise<Syn
     let { matched, unmatched } = doMatch(purchase.items, products);
     console.log(`  pass1: ${matched.length} matched, ${unmatched.length} unmatched`);
 
+    // 🤖 Audit pra Zelda: cada unmatched do pass 1 é uma falha do matcher.
+    // Grava como match_correction event pra ela aprender o padrão depois.
+    // Context = 'scraper-vendtef-entrada' distingue dos da UI Bruno.
+    for (const u of unmatched) {
+      await prisma.workerRun.create({
+        data: {
+          name: 'match_correction',
+          status: 'OK',
+          finishedAt: new Date(),
+          meta: {
+            context: 'scraper-vendtef-entrada',
+            purchaseId: purchase.id,
+            inputText: u.ourName,
+            suggestedSkuName: u.bestVendtefName !== '—' ? u.bestVendtefName : null,
+            suggestedScore: u.bestScore,
+            suggestedSkuId: null, // matcher comparou só por nome no Vendtef
+            actualSkuId: null,
+            finalAction: 'new', // Bruno vai tentar cadastrar
+            correctionType: u.bestScore > 0
+              ? 'matcher_missed_in_vendtef_low_score' // tinha candidato mas score < MIN_SCORE
+              : 'matcher_missed_in_vendtef_no_candidate', // nenhum candidato razoável
+            qty: u.qty,
+          } as never,
+        },
+      }).catch((e) => console.warn('[match_correction scraper]', e instanceof Error ? e.message : e));
+    }
+
     // === Pass 2: cadastra unmatched, refaz entrada ===
     const cadastros: { ourName: string; result: CadastroResult }[] = [];
     if (unmatched.length > 0) {
@@ -553,6 +609,31 @@ async function main() {
   } finally {
     await ctx.close();
     await browser.close();
+  }
+
+  // 🤖 Trigger Zelda no fim do scraper. Match_correction events foram gravados
+  // ao longo da execução; agora pedimos análise incremental + notify.
+  // Faz HTTP call pro endpoint pra rodar no Vercel (scraper está no GH Actions
+  // sem acesso ao ANTHROPIC_API_KEY local).
+  const baseUrl = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
+  try {
+    const res = await fetch(`${baseUrl}/api/zelda/audit-matcher?incremental=1`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { findings?: unknown[]; correctionsAnalyzed?: number; skipped?: string };
+      console.log(
+        `\n→ Zelda audit: ${json.correctionsAnalyzed ?? 0} correções analisadas, ${
+          Array.isArray(json.findings) ? json.findings.length : 0
+        } finding(s)${json.skipped ? ` (skipped: ${json.skipped})` : ''}`,
+      );
+    } else {
+      console.warn(`→ Zelda audit HTTP ${res.status}`);
+    }
+  } catch (e) {
+    console.warn('→ Zelda audit fail:', e instanceof Error ? e.message : e);
+  } finally {
     await prisma.$disconnect();
   }
 }
