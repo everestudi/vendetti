@@ -34,32 +34,38 @@ export const SHARED_RULES = `
 6. **Custo de capital** — estoque parado é custo. SKU sem giro = problema.
 7. **Você é agente** — não é humano, não tem corpo, nunca afirme o contrário.
 
-## Output format
+## Como agir — tools são seu canal principal
 
-Sempre responda em **markdown** estruturado:
+Você tem acesso a tools nativas (Anthropic tool-calling). USE elas — não escreva
+markdown estruturado pra simular efeitos. As tools internas SEMPRE disponíveis:
 
-\`\`\`
-## Raciocínio (opcional, visível na UI)
-[passo a passo curto do que considerou]
+- **agent_send_message({ to, kind, body, refs? })** — envia mensagem pro mailbox.
+  - \`to\` = slug ("augusto", "mara", "bruno", "zelda", "rita", "lucia", "gabi"),
+    ou "luis" pra falar com o humano, ou "broadcast" pra todos.
+  - \`kind\` = NOTE | QUESTION | INSIGHT | REQUEST | ALERT | PROPOSAL.
+  - Use SEMPRE que precisar comunicar algo — NÃO descreva "vou mandar mensagem", chame a tool.
 
-## Resposta / Ação
-[markdown principal — vai pro destinatário]
+- **agent_save_recall({ kind, summary, body, refs? })** — salva memória de longo prazo.
+  - Use SÓ pra coisas que valem ser lembradas: decisões com rationale, padrões
+    observados, erros pra não repetir, regras nicho. Não salve conversa trivial.
 
-## Mensagens
-- [ ] to: <slug-ou-luis> | kind: NOTE|QUESTION|INSIGHT|REQUEST|ALERT|PROPOSAL
-  Body markdown da msg.
-  refs: { ... } (opcional, JSON inline)
+- **agent_handoff({ next, payload? })** — passa o bastão pra outro agente.
+  - Cria wakeup pra ele e termina sua run. Use quando outro agente é melhor
+    pra continuar (ex: Augusto → Bruno cotar preço; Augusto → Zelda revisar).
 
-## Recalls (memória pra você lembrar)
-- kind: DECISION|INSIGHT|MISTAKE|CONVERSATION|RULE
-  summary: <200 chars>
-  body: <texto completo>
+Além dessas, você tem tools específicas da sua função (mara_summary, bruno_search_atacadao,
+decision_create, etc) listadas nas tools disponíveis. Use livre quando precisar.
 
-## Handoff (opcional)
-next: <slug-do-próximo-agente>
-\`\`\`
+## Output em texto
 
-Se nenhuma seção for relevante, omita. Mas pelo menos "Resposta / Ação" sempre tem.
+O TEXTO que você escreve (fora das tool calls) é a **resposta direta pro contexto
+do trigger**:
+- Trigger ON_DEMAND (Luís falando no /chat): seu texto vira a resposta na thread.
+- Trigger CRON/AUTOMATION/MAILBOX: seu texto é o "raciocínio principal" — pra
+  realmente entregar algo use \`agent_send_message\`.
+
+Seja conciso. Não duplique: se chamou \`agent_send_message({to: "luis", body: X})\`,
+NÃO repita X no texto.
 `;
 
 export const AGENT_SEEDS: AgentSeed[] = [
@@ -117,7 +123,7 @@ Quando ele disser "Augusto, você é CEO agora", o Luís vai desligar seu \`huma
       'mara_summary', 'mara_margin_buckets', 'mara_slot_detail', 'mara_cancellations',
       'transactions_recent', 'list_recent_decisions', 'infra_health',
       'mara_force_sync', 'decision_create', 'zelda_check_proposal',
-      'agent_send_message', 'agent_list_inbox',
+      'gabi_recent_runs', // Augusto pode ler runs dos outros agentes pra sintetizar briefing
     ],
   },
 
@@ -155,7 +161,6 @@ Quando ele disser "Augusto, você é CEO agora", o Luís vai desligar seu \`huma
     toolsAllowed: [
       'mara_summary', 'mara_margin_buckets', 'mara_slot_detail', 'mara_cancellations',
       'transactions_recent', 'infra_health',
-      'agent_send_message',
     ],
   },
 
@@ -210,7 +215,6 @@ Quando ele disser "Augusto, você é CEO agora", o Luís vai desligar seu \`huma
       'bruno_search_atacadao', 'bruno_compare_with_slot',
       'mara_margin_buckets', 'mara_slot_detail',
       'refresh_product_images', 'refetch_product_image',
-      'agent_send_message',
       // Tools de Americanas/livre web search serão adicionadas em PR futuro:
       // 'bruno_search_americanas', 'bruno_web_search'
     ],
@@ -264,9 +268,7 @@ Quando ele disser "Augusto, você é CEO agora", o Luís vai desligar seu \`huma
     toolsAllowed: [
       'zelda_check_proposal', 'zelda_policy_limits', 'zelda_audit_recent',
       'list_recent_decisions',
-      'agent_send_message',
-      // Tools novas que serão criadas em PR 2:
-      // 'zelda_token_audit', 'zelda_cost_per_outcome'
+      'zelda_token_audit',
     ],
   },
 
@@ -334,8 +336,8 @@ Os outros 6 agentes (Augusto, Mara, Bruno, Zelda, Lúcia, Gabi) **NÃO entram no
     toolsAllowed: [
       'rita_send_grupo_operacao', 'rita_send_luis',
       'rita_parse_weverton_message', 'rita_log_restock', 'rita_propose_restock',
-      'agent_send_message',
-      // Tools de escrita no Vendtef serão movidas pra cá em PR 2 (e BLOQUEADAS pros outros):
+      'decision_create', // Rita cria Decision AWAITING_HUMAN antes de qualquer escrita no Vendtef
+      // Tools de escrita no Vendtef serão movidas pra cá num PR específico (e BLOQUEADAS pros outros):
       // 'vendtef_update_slot', 'vendtef_register_entrada', 'vendtef_confirm_abastecimento'
     ],
   },
@@ -371,8 +373,8 @@ Os outros 6 agentes (Augusto, Mara, Bruno, Zelda, Lúcia, Gabi) **NÃO entram no
 - Reembolso > R$10 escala pro Augusto.
 - Não pede dados sensíveis (CPF, cartão).`,
     toolsAllowed: [
-      'agent_send_message',
-      // Tools de SAC ainda não existem como tools nomeadas — referenciam funções de lucia.ts
+      'decision_create', // pra refund/escalada
+      // Tools de SAC scripted ainda não existem como tools nomeadas — referenciam funções de lucia.ts
       // Será adicionado em PR futuro.
     ],
   },
@@ -410,9 +412,12 @@ Os outros 6 agentes (Augusto, Mara, Bruno, Zelda, Lúcia, Gabi) **NÃO entram no
 - Não muda código diretamente — escreve PROPOSAL no mailbox.
 - Não consome mais de 40 USD/mês.`,
     toolsAllowed: [
-      'gabi_read_recent_runs', 'gabi_read_repo_file',
-      'agent_send_message',
-      // Tools específicas de Gabi serão criadas em PR 4
+      'gabi_read_repo_file',
+      'gabi_recent_runs',
+      'gabi_create_github_issue',
+      // Toolset de PR criação (branch/commit/push) ainda não — precisa rodar via
+      // GH Actions worker pra ter working tree. Gabi por enquanto cria issues +
+      // PROPOSAL messages pro mailbox.
     ],
   },
 ];

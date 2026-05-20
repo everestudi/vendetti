@@ -19,6 +19,13 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk';
+import type {
+  MessageParam,
+  ContentBlock,
+  ToolUseBlock,
+  TextBlock,
+  ThinkingBlock,
+} from '@anthropic-ai/sdk/resources/messages';
 import { prisma } from '../db';
 import { getSecret } from '../secrets';
 import {
@@ -33,6 +40,7 @@ import {
   calcCost,
 } from './types';
 import { SHARED_RULES } from './seed';
+import { buildToolsForAgent, type ToolExecutionContext } from './tool-bridge';
 import type { Agent, AgentTrigger, AgentMessageKind, AgentMemoryKind } from '@prisma/client';
 
 // ============================================================
@@ -329,29 +337,157 @@ function parseRecallSection(section: string | undefined): NewRecallDraft[] {
 // LLM call
 // ============================================================
 
-async function callAnthropic(
+/**
+ * Agentic loop com tool calling nativo do Anthropic SDK.
+ *
+ * Enquanto `stop_reason === 'tool_use'`, executa os tool_use blocks, coleta os
+ * resultados, adiciona ao histórico, e chama o modelo de novo. Para quando
+ * `stop_reason === 'end_turn'` (modelo terminou) ou bate em maxSteps.
+ *
+ * Drafts (mensagens novas, recalls, handoff) são acumulados em `ctx.drafts`
+ * via tools internas (agent_send_message, agent_save_recall, agent_handoff)
+ * e processados pelo runtime no fim da run.
+ */
+async function callAnthropicWithLoop(
   apiKey: string,
   agent: Agent,
   systemPrompt: string,
   userMessage: string,
-): Promise<{ raw: string; tokensIn: number; tokensOut: number }> {
+  runId: string,
+  maxSteps = 10,
+): Promise<{
+  textOutput: string;
+  thinking: string | null;
+  drafts: ToolExecutionContext['drafts'];
+  tokensIn: number;
+  tokensOut: number;
+  toolCallLogs: ToolCallLog[];
+}> {
   const client = new Anthropic({ apiKey });
-  const msg = await client.messages.create({
-    model: agent.model,
-    max_tokens: 4096,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userMessage }],
-  });
+  const { tools, executors } = buildToolsForAgent(agent.toolsAllowed);
 
-  const raw = msg.content
-    .filter((c) => c.type === 'text')
-    .map((c) => (c as { type: 'text'; text: string }).text)
-    .join('\n');
+  const drafts: ToolExecutionContext['drafts'] = {
+    messages: [],
+    recalls: [],
+  };
+  const toolCallLogs: ToolCallLog[] = [];
+  const ctx: ToolExecutionContext = {
+    agentSlug: agent.slug,
+    agentId: agent.id,
+    runId,
+    drafts,
+  };
+
+  const messages: MessageParam[] = [{ role: 'user', content: userMessage }];
+  const textChunks: string[] = [];
+  const thinkingChunks: string[] = [];
+  let totalIn = 0;
+  let totalOut = 0;
+
+  for (let step = 0; step < maxSteps; step++) {
+    const response = await client.messages.create({
+      model: agent.model,
+      max_tokens: 4096,
+      system: systemPrompt,
+      tools: tools.length > 0
+        ? (tools.map((t) => ({
+            name: t.name,
+            description: t.description,
+            input_schema: t.input_schema as never,
+          })) as never)
+        : undefined,
+      messages,
+    });
+
+    totalIn += response.usage.input_tokens;
+    totalOut += response.usage.output_tokens;
+
+    // Coleta text + thinking blocks pra log/UI
+    for (const block of response.content) {
+      if (block.type === 'text') {
+        textChunks.push((block as TextBlock).text);
+      } else if (block.type === 'thinking') {
+        thinkingChunks.push((block as ThinkingBlock).thinking);
+      }
+    }
+
+    // Anexa resposta do assistant ao histórico (REQUIRED pelo Anthropic SDK)
+    messages.push({ role: 'assistant', content: response.content as ContentBlock[] });
+
+    if (response.stop_reason !== 'tool_use') {
+      break;
+    }
+
+    // Executa cada tool_use, coleta resultados, monta tool_result block
+    const toolUses = response.content.filter((b): b is ToolUseBlock => b.type === 'tool_use');
+    const toolResults: Array<{
+      type: 'tool_result';
+      tool_use_id: string;
+      content: string;
+      is_error?: boolean;
+    }> = [];
+
+    for (const tu of toolUses) {
+      const exec = executors[tu.name];
+      const t0 = Date.now();
+      if (!exec) {
+        toolCallLogs.push({
+          name: tu.name,
+          input: tu.input,
+          output: null,
+          ms: 0,
+          error: `tool "${tu.name}" não tem executor — não chame essa`,
+        });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify({ error: `unknown tool: ${tu.name}` }),
+          is_error: true,
+        });
+        continue;
+      }
+      try {
+        const out = await exec.execute(tu.input, ctx);
+        const ms = Date.now() - t0;
+        toolCallLogs.push({ name: tu.name, input: tu.input, output: out, ms });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify(out).slice(0, 50_000), // anthropic limita
+        });
+      } catch (err) {
+        const ms = Date.now() - t0;
+        const msg = err instanceof Error ? err.message : String(err);
+        toolCallLogs.push({
+          name: tu.name,
+          input: tu.input,
+          output: null,
+          ms,
+          error: msg,
+        });
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: tu.id,
+          content: JSON.stringify({ error: msg }),
+          is_error: true,
+        });
+      }
+    }
+
+    // Adiciona tool_result e segue o loop
+    messages.push({
+      role: 'user',
+      content: toolResults as never,
+    });
+  }
 
   return {
-    raw,
-    tokensIn: msg.usage.input_tokens,
-    tokensOut: msg.usage.output_tokens,
+    textOutput: textChunks.join('\n\n').trim(),
+    thinking: thinkingChunks.length > 0 ? thinkingChunks.join('\n\n') : null,
+    drafts,
+    tokensIn: totalIn,
+    tokensOut: totalOut,
+    toolCallLogs,
   };
 }
 
@@ -398,8 +534,6 @@ export async function runAgent(input: {
     },
   });
 
-  const toolCalls: ToolCallLog[] = [];
-
   try {
     // Carrega contexto
     const [inbox, recalls] = await Promise.all([
@@ -419,12 +553,36 @@ export async function runAgent(input: {
     const systemPrompt = buildSystemPrompt(agent);
     const userMessage = buildUserMessage(ctx);
 
-    // Chama LLM
-    const { raw, tokensIn, tokensOut } = await callAnthropic(apiKey, agent, systemPrompt, userMessage);
+    // Agentic loop com tool calling nativo
+    const loopResult = await callAnthropicWithLoop(apiKey, agent, systemPrompt, userMessage, run.id);
+    const { textOutput, thinking, drafts: toolDrafts, tokensIn, tokensOut, toolCallLogs: toolCalls } = loopResult;
     const costUsd = calcCost(agent.model, tokensIn, tokensOut);
 
-    // Parse output
-    const parsed = parseAgentOutput(raw);
+    // Parse fallback do output (caso modelo escreva markdown estruturado em vez
+    // de chamar tools internas — agentes Haiku às vezes fazem isso)
+    const parsedMd = parseAgentOutput(textOutput);
+
+    // Merge: tools nativas têm prioridade; markdown parsing complementa o que faltou
+    const finalThinking = thinking || parsedMd.thinkingMd || null;
+    const finalOutput = parsedMd.outputMd || textOutput;
+    const finalMessages: NewMessageDraft[] = [
+      ...toolDrafts.messages,
+      // Inclui parsed só se tool calls não produziu nada (evita duplicação)
+      ...(toolDrafts.messages.length === 0 ? parsedMd.newMessages : []),
+    ];
+    const finalRecalls: NewRecallDraft[] = [
+      ...toolDrafts.recalls,
+      ...(toolDrafts.recalls.length === 0 ? parsedMd.newRecalls : []),
+    ];
+    const finalNextAgentSlug = toolDrafts.nextAgentSlug || parsedMd.nextAgentSlug;
+
+    const parsed = {
+      thinkingMd: finalThinking,
+      outputMd: finalOutput,
+      newMessages: finalMessages,
+      newRecalls: finalRecalls,
+      nextAgentSlug: finalNextAgentSlug,
+    };
 
     // Persiste: marca msgs do inbox como READ, cria mensagens novas, cria recalls, atualiza run, atualiza spent
     await prisma.$transaction(async (tx) => {
@@ -553,7 +711,7 @@ export async function runAgent(input: {
     return {
       runId: run.id,
       result: {
-        thinkingMd: parsed.thinkingMd,
+        thinkingMd: parsed.thinkingMd ?? undefined,
         outputMd: parsed.outputMd,
         toolCalls,
         newMessages: parsed.newMessages,

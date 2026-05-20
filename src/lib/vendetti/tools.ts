@@ -944,6 +944,238 @@ export const refetch_product_image = tool({
   },
 });
 
+// ============================================================
+// Zelda · token watchdog (audita custos dos agentes)
+// ============================================================
+
+export const zelda_token_audit = tool({
+  description:
+    'Auditoria de tokens/custo dos agentes da empresa Vendetti. Retorna: gasto/budget per-agente, velocidade de queima (vai estourar?), cost per outcome (cost / mensagens geradas), top tools usadas. Use semanalmente OU quando um agente tiver gasto > 50% do budget.',
+  inputSchema: z.object({
+    days: z.number().int().min(1).max(60).default(7).describe('Janela de dias pra calcular cost/run'),
+  }),
+  execute: async ({ days }) => {
+    const since = new Date(Date.now() - days * 24 * 3600 * 1000);
+    const agents = await prisma.agent.findMany({
+      where: { active: true },
+      select: {
+        slug: true,
+        name: true,
+        emoji: true,
+        model: true,
+        budgetUsdMonth: true,
+        spentUsdMonth: true,
+        humanInLoop: true,
+        paused: true,
+      },
+      orderBy: { slug: 'asc' },
+    });
+
+    const out = await Promise.all(
+      agents.map(async (a) => {
+        const [runs, msgs] = await Promise.all([
+          prisma.agentRun.findMany({
+            where: { agentId: (await prisma.agent.findUnique({ where: { slug: a.slug } }))!.id, startedAt: { gte: since } },
+            select: { costUsd: true, tokensIn: true, tokensOut: true, toolCalls: true, status: true },
+          }),
+          prisma.agentMessage.count({
+            where: { fromAgent: { slug: a.slug }, createdAt: { gte: since } },
+          }),
+        ]);
+
+        const totalCost = runs.reduce((s, r) => s + Number(r.costUsd), 0);
+        const totalTokensIn = runs.reduce((s, r) => s + r.tokensIn, 0);
+        const totalTokensOut = runs.reduce((s, r) => s + r.tokensOut, 0);
+        const costPerRun = runs.length > 0 ? totalCost / runs.length : 0;
+        const costPerOutcome = msgs > 0 ? Number(a.spentUsdMonth) / msgs : null;
+
+        // Velocidade de queima — se manter ritmo, vai estourar?
+        const dayOfMonth = new Date().getDate();
+        const projected = dayOfMonth > 0 ? (Number(a.spentUsdMonth) / dayOfMonth) * 30 : 0;
+        const willOverflow = projected > Number(a.budgetUsdMonth) * 1.05; // >5% acima
+
+        // Top tools (mais usadas)
+        const toolUsage = new Map<string, number>();
+        for (const r of runs) {
+          const tcs = (r.toolCalls as Array<{ name?: string }> | null) ?? [];
+          for (const tc of tcs) {
+            if (tc.name) toolUsage.set(tc.name, (toolUsage.get(tc.name) ?? 0) + 1);
+          }
+        }
+        const topTools = Array.from(toolUsage.entries())
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 5)
+          .map(([name, count]) => ({ name, count }));
+
+        const failedRuns = runs.filter((r) => r.status === 'FAILED').length;
+
+        return {
+          agent: { slug: a.slug, name: a.name, emoji: a.emoji, model: a.model, paused: a.paused },
+          budget: Number(a.budgetUsdMonth),
+          spentMonth: Number(a.spentUsdMonth),
+          projectedMonth: Math.round(projected * 100) / 100,
+          willOverflow,
+          runsInWindow: runs.length,
+          failedRuns,
+          msgsInWindow: msgs,
+          tokensInWindow: totalTokensIn + totalTokensOut,
+          costInWindow: Math.round(totalCost * 10000) / 10000,
+          costPerRun: Math.round(costPerRun * 10000) / 10000,
+          costPerOutcome: costPerOutcome ? Math.round(costPerOutcome * 10000) / 10000 : null,
+          topTools,
+        };
+      }),
+    );
+
+    const totalBudget = out.reduce((s, a) => s + a.budget, 0);
+    const totalSpent = out.reduce((s, a) => s + a.spentMonth, 0);
+    const overflowing = out.filter((a) => a.willOverflow).map((a) => a.agent.slug);
+    const idle = out.filter((a) => a.runsInWindow === 0).map((a) => a.agent.slug);
+
+    return {
+      from: 'Zelda · Watchdog',
+      windowDays: days,
+      totalBudgetMonth: totalBudget,
+      totalSpentMonth: totalSpent,
+      utilizationPct: Math.round((totalSpent / totalBudget) * 100),
+      overflowingAgents: overflowing,
+      idleAgents: idle,
+      perAgent: out,
+    };
+  },
+});
+
+// ============================================================
+// Gabi · co-founder (escopo é o PRODUTO Vendetti, não a vending)
+// ============================================================
+
+export const gabi_read_repo_file = tool({
+  description:
+    'Lê um arquivo do repositório Vendetti (Gabi only — escopo dela é o produto). Path relativo ao root do repo (ex: "src/lib/agents/runtime.ts"). Limita a 50KB pra não estourar context.',
+  inputSchema: z.object({
+    path: z.string().describe('Path relativo ao root, ex: "src/lib/agents/runtime.ts"'),
+  }),
+  execute: async ({ path }) => {
+    // Segurança: bloqueia paths escapando o repo
+    if (path.includes('..') || path.startsWith('/') || path.startsWith('~')) {
+      return { error: 'path inválido — use caminho relativo ao root do repo' };
+    }
+    try {
+      const fs = await import('fs/promises');
+      const pathLib = await import('path');
+      const fullPath = pathLib.resolve(process.cwd(), path);
+      // Confirma que tá dentro do cwd
+      if (!fullPath.startsWith(process.cwd())) {
+        return { error: 'path fora do repo' };
+      }
+      const stat = await fs.stat(fullPath);
+      if (stat.size > 50_000) {
+        return { error: `arquivo grande (${stat.size} bytes) — limite 50KB. Use grep ou faça leitura paginada.` };
+      }
+      const content = await fs.readFile(fullPath, 'utf-8');
+      return {
+        ok: true,
+        path,
+        size: stat.size,
+        content,
+      };
+    } catch (e) {
+      return { error: `falha ao ler "${path}": ${e instanceof Error ? e.message : String(e)}` };
+    }
+  },
+});
+
+export const gabi_recent_runs = tool({
+  description:
+    'Gabi only: lista runs recentes dos outros agentes pra detectar padrões (gargalo, bug, ideia repetida). Retorna: agent, trigger, status, cost, tools usadas, output (truncado). Use pra mapear o que o time tá fazendo antes de propor mudança.',
+  inputSchema: z.object({
+    slug: z.string().optional().describe('Filtra por agente (ex: "augusto"). Vazio = todos.'),
+    limit: z.number().int().min(1).max(50).default(20),
+  }),
+  execute: async ({ slug, limit }) => {
+    const where = slug ? { agent: { slug } } : {};
+    const runs = await prisma.agentRun.findMany({
+      where,
+      orderBy: { startedAt: 'desc' },
+      take: limit,
+      include: { agent: { select: { slug: true, name: true, emoji: true } } },
+    });
+    return {
+      from: 'Gabi · Co-founder',
+      count: runs.length,
+      runs: runs.map((r) => ({
+        runId: r.id.slice(0, 12),
+        agent: `${r.agent.emoji} ${r.agent.name}`,
+        trigger: r.trigger,
+        status: r.status,
+        costUsd: Number(r.costUsd),
+        tokensIn: r.tokensIn,
+        tokensOut: r.tokensOut,
+        startedAt: r.startedAt.toISOString(),
+        durationMs: r.finishedAt ? r.finishedAt.getTime() - r.startedAt.getTime() : null,
+        toolsCalled: ((r.toolCalls as Array<{ name?: string }> | null) ?? []).map((tc) => tc.name).filter(Boolean),
+        outputPreview: r.outputMd?.slice(0, 200) ?? null,
+        nextAgentSlug: r.nextAgentSlug,
+        error: r.errorMsg,
+      })),
+    };
+  },
+});
+
+export const gabi_create_github_issue = tool({
+  description:
+    'Gabi only: cria uma issue no repo everestudi/vendetti via GH API. Use pra propor feature/bug com detalhamento técnico. NÃO usa pra coisas triviais — só quando tiver investigado e ter recomendação clara. Issue fica como rascunho pro Luís revisar e priorizar.',
+  inputSchema: z.object({
+    title: z.string().min(5).max(120),
+    body: z
+      .string()
+      .min(20)
+      .describe(
+        'Body em markdown. Estrutura sugerida: ## Motivação · ## O que mudaria · ## Esboço de impl · ## Esforço estimado (h) · ## Refs (arquivos/runs)',
+      ),
+    labels: z.array(z.string()).optional().describe('Labels GitHub (ex: ["enhancement", "from-gabi"])'),
+  }),
+  execute: async ({ title, body, labels }) => {
+    const token = await getSecret('GITHUB_PAT');
+    if (!token) {
+      return {
+        error: 'GITHUB_PAT ausente no DB. Configure em /settings pra Gabi poder abrir issue.',
+      };
+    }
+    const fullLabels = ['from-gabi', ...(labels ?? [])];
+    try {
+      const r = await fetch('https://api.github.com/repos/everestudi/vendetti/issues', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
+        },
+        body: JSON.stringify({ title, body, labels: fullLabels }),
+      });
+      const json = (await r.json()) as { html_url?: string; number?: number; message?: string };
+      if (!r.ok) {
+        return { error: `GitHub API ${r.status}: ${json.message ?? 'unknown'}` };
+      }
+      return {
+        ok: true,
+        from: 'Gabi · Co-founder',
+        issueNumber: json.number,
+        url: json.html_url,
+        note: 'Issue aberta. Luís revisa em /issues do repo. Labels: from-gabi + custom.',
+      };
+    } catch (e) {
+      return { error: `falha ao chamar GH API: ${e instanceof Error ? e.message : String(e)}` };
+    }
+  },
+});
+
+// Helper local pra Gabi/runtime acessar getSecret sem import circular feio
+async function getSecret(key: string): Promise<string | null> {
+  const { getSecret: gs } = await import('../secrets');
+  return gs(key);
+}
+
 export const VENDETTI_TOOLS = {
   mara_summary,
   mara_margin_buckets,
@@ -969,4 +1201,8 @@ export const VENDETTI_TOOLS = {
   infra_trigger_backfill,
   refresh_product_images,
   refetch_product_image,
+  zelda_token_audit,
+  gabi_read_repo_file,
+  gabi_recent_runs,
+  gabi_create_github_issue,
 } as const;
