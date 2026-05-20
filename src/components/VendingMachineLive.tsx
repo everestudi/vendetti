@@ -131,13 +131,8 @@ function SlotTile({
   const meta = getProductMeta(slot.productName);
   const critical = slot.marginPct !== null && slot.marginPct < 30;
   const bgClass = !slot.productName
-    ? 'bg-white'
-    : critical
-      ? 'bg-rose-100 ring-rose-300'
-      : meta.bgClass;
-
-  const everestEmpty = slot.everestQty !== undefined && slot.everestQty !== null && slot.everestQty === 0;
-  const everestLow = slot.everestStatus === 'crítico' || (slot.everestQty !== null && slot.everestQty !== undefined && slot.everestQty > 0 && slot.everestStatus === 'alerta');
+    ? 'bg-navy-50/40'
+    : 'bg-white';
 
   // Barrinha de qty na mola (mini bateria vertical). currentQty/capacity.
   const cap = slot.capacity > 0 ? slot.capacity : 1;
@@ -162,30 +157,31 @@ function SlotTile({
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onClick={onClick}
-      className={`group relative flex aspect-[3/4] flex-col items-center justify-between rounded ${bgClass} ring-1 transition ${
+      className={`group relative flex aspect-[3/4] flex-col items-stretch justify-between overflow-hidden rounded border ${bgClass} transition ${
         isSelected
-          ? 'ring-2 ring-gold scale-105 z-10'
-          : 'ring-navy/10 hover:scale-110 hover:ring-2 hover:ring-navy/40 hover:z-10'
+          ? 'border-gold border-2 scale-105 z-10 shadow-md'
+          : 'border-navy/15 hover:scale-110 hover:border-navy/40 hover:z-10 hover:shadow'
       }`}
     >
       {/* Número do slot no canto superior esquerdo (mono, discreto) */}
-      <div className="absolute left-0.5 top-0 z-10 rounded-br bg-white/60 px-0.5 font-mono text-[7px] text-navy/55">{slot.selecao}</div>
+      <div className="absolute left-0.5 top-0 z-10 rounded-br bg-white/80 px-1 py-px font-mono text-[8px] font-bold text-navy/65">{slot.selecao}</div>
 
-      <div className="flex flex-1 items-center justify-center pt-2">
+      {/* IMAGEM grande ocupando 75% do tile */}
+      <div className="flex h-[75%] items-center justify-center px-1 pt-2">
         {slot.productImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={slot.productImageUrl}
             alt={slot.productName ?? ''}
-            className="max-h-[70%] max-w-[80%] object-contain"
+            className="max-h-full max-w-full object-contain"
             loading="lazy"
           />
         ) : (
-          <div className="text-base leading-none">{meta.emoji}</div>
+          <div className="text-2xl leading-none">{meta.emoji}</div>
         )}
       </div>
 
-      {/* Barrinha mola: mini bateria horizontal abaixo do emoji */}
+      {/* Barrinha mola: mini bateria horizontal */}
       <div className="mt-0.5 flex w-full items-center gap-px px-1">
         {Array.from({ length: Math.min(cap, 8) }).map((_, i) => {
           const filled = i < Math.floor(qtyPct * Math.min(cap, 8));
@@ -201,7 +197,7 @@ function SlotTile({
       {/* Preço no formato BR R$X,XX embaixo */}
       <div className="mb-0.5 mt-px flex w-full justify-center px-1">
         {priceBR && (
-          <span className="font-mono text-[7px] font-bold text-navy/85">{priceBR}</span>
+          <span className="font-mono text-[8px] font-bold text-navy/85">{priceBR}</span>
         )}
       </div>
 

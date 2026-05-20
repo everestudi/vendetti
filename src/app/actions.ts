@@ -23,12 +23,23 @@ export async function forceMaraSync() {
 }
 
 /**
- * Popula imageUrl em todos os SKUs ativos via Atacadão VTEX search.
- * Chamada pelo botão "Atualizar imagens" em algum lugar.
+ * Popula imageUrl em todos os SKUs ativos sem imagem ainda.
+ * Fallback: Atacadão → Claude web search.
  */
 export async function refreshProductImages() {
   const r = await backfillProductImages({ max: 100 });
   console.log('[refreshProductImages]', r);
   revalidatePath('/');
-  redirect(`/?images=${r.matched}/${r.total}`);
+  redirect(`/?images=${encodeURIComponent(`${r.matched}/${r.total} matched (${r.failed} falharam)`)}`);
+}
+
+/**
+ * Re-busca TODAS as imagens (incluindo as que já tinham URL) — pra corrigir
+ * matches errados (ex: água sem gás pegou imagem da com gás).
+ */
+export async function refetchAllProductImages() {
+  const r = await backfillProductImages({ max: 100, force: true });
+  console.log('[refetchAllProductImages]', r);
+  revalidatePath('/');
+  redirect(`/?images=${encodeURIComponent(`re-busca: ${r.matched}/${r.total} atualizadas (${r.failed} falharam)`)}`);
 }

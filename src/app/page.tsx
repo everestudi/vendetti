@@ -13,9 +13,10 @@ import {
 
 export const dynamic = 'force-dynamic';
 
-export default async function Home({ searchParams }: { searchParams: Promise<{ sync?: string; err?: string }> }) {
+export default async function Home({ searchParams }: { searchParams: Promise<{ sync?: string; err?: string; images?: string }> }) {
   const params = await searchParams;
   const syncFeedback = params.sync === 'triggered' ? 'triggered' : params.sync === 'failed' ? 'failed' : null;
+  const imagesFeedback = params.images ?? undefined;
 
   const [snap, slots, revenueSeries, syncStatus, pending, dailyComparison, augusto] = await Promise.all([
     getLatestSnapshot(),
@@ -63,6 +64,7 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
         augusto={augusto}
         syncFeedback={syncFeedback}
         syncFeedbackError={params.err}
+        imagesFeedback={imagesFeedback}
       />
 
       {/* MÁQUINA INTERATIVA — visão ao vivo dos slots com badge Everest */}

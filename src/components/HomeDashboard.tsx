@@ -9,8 +9,9 @@
 
 import Link from 'next/link';
 import { MonthlyRevenuePoint, AgentPending, SyncStatus, DailyComparisonPoint, AugustoCommentary } from '@/lib/dashboard';
-import { forceMaraSync, refreshProductImages } from '@/app/actions';
+import { forceMaraSync, refreshProductImages, refetchAllProductImages } from '@/app/actions';
 import { RevenueCharts } from './RevenueCharts';
+import { SubmitButton } from './SubmitButton';
 
 interface Props {
   revenueSeries: MonthlyRevenuePoint[];
@@ -20,6 +21,7 @@ interface Props {
   augusto: AugustoCommentary | null;
   syncFeedback?: 'triggered' | 'failed' | null;
   syncFeedbackError?: string;
+  imagesFeedback?: string; // ex: "12/45 (3 falharam)"
 }
 
 const brl = (n: number) =>
@@ -31,7 +33,7 @@ const LEVEL_CLS: Record<AgentPending['level'], { card: string; badge: string }> 
   critical: { card: 'border-rose-300 bg-rose-50/60', badge: 'bg-rose-100 text-rose-800' },
 };
 
-export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pending, augusto, syncFeedback, syncFeedbackError }: Props) {
+export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pending, augusto, syncFeedback, syncFeedbackError, imagesFeedback }: Props) {
   // Filtra meses com dado (remove os 0 antigos que confundem o gráfico)
   const seriesWithData = revenueSeries.filter((p) => p.revenue > 0);
   // Mantém último mês mesmo zerado (mês atual parcial)
@@ -77,6 +79,12 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           <Link href="/" className="ml-2 text-xs underline">fechar</Link>
         </div>
       )}
+      {imagesFeedback && (
+        <div className="mb-4 rounded-lg border-2 border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
+          🖼️ <strong>Imagens atualizadas:</strong> {imagesFeedback}
+          <Link href="/" className="ml-2 text-xs underline">fechar</Link>
+        </div>
+      )}
 
       {/* ===== SEÇÃO 1 · FATURAMENTO ===== */}
       <section className="mb-8 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
@@ -84,22 +92,31 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           <h2 className="text-xl font-bold text-navy">💰 Faturamento</h2>
           <div className="flex gap-2">
             <form action={refreshProductImages}>
-              <button
-                type="submit"
+              <SubmitButton
+                pendingText="Buscando..."
                 className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
-                title="Busca imagens dos produtos no Atacadão VTEX e popula Sku.imageUrl"
+                title="Busca imagens só pros SKUs sem imagem (Atacadão → Claude). ~30s-1min"
               >
                 🖼️ Imagens
-              </button>
+              </SubmitButton>
+            </form>
+            <form action={refetchAllProductImages}>
+              <SubmitButton
+                pendingText="Re-buscando..."
+                className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
+                title="Re-busca TODAS as imagens — pra corrigir matches errados. Pode levar 2-3min."
+              >
+                🔁 Re-buscar
+              </SubmitButton>
             </form>
             <form action={forceMaraSync}>
-              <button
-                type="submit"
+              <SubmitButton
+                pendingText="Disparando..."
                 className="rounded-lg bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-900"
-                title="Dispara mara-sync no GH Actions · ~3-5min"
+                title="Dispara mara-sync no GH Actions · ~3-5min depois"
               >
                 🔄 Sincronizar agora
-              </button>
+              </SubmitButton>
             </form>
           </div>
         </header>

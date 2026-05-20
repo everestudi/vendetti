@@ -12,21 +12,23 @@ export interface ProductMeta {
   bgClass: string;
 }
 
+// Cor de fundo padrão = branco neutro (deixa imagem ser destaque).
+// Cor por categoria é só pra fallback quando NÃO tem imageUrl (emoji visível).
 const RULES: Array<[RegExp, ProductMeta]> = [
-  [/\bágua|agua\b/i, { emoji: '💧', category: 'agua', bgClass: 'bg-sky-100' }],
-  [/red bull|monster|energ/i, { emoji: '⚡', category: 'energetico', bgClass: 'bg-amber-100' }],
-  [/powerade|gatorade|isotôn/i, { emoji: '🏃', category: 'isotonico', bgClass: 'bg-lime-100' }],
-  [/coca|refri|cola/i, { emoji: '🥤', category: 'refri', bgClass: 'bg-rose-100' }],
-  [/chá|mate|bear mate/i, { emoji: '🍵', category: 'cha', bgClass: 'bg-emerald-100' }],
-  [/kit kat|bis|m\&m|mms/i, { emoji: '🍫', category: 'choc', bgClass: 'bg-orange-100' }],
-  [/barra.*(cereal|protein|whey|crisp|delicio|buenissimo|topway|ftw|nutry)/i, { emoji: '🌾', category: 'barra', bgClass: 'bg-yellow-100' }],
-  [/halls|mentos|bala/i, { emoji: '🍬', category: 'bala', bgClass: 'bg-pink-100' }],
-  [/wafer/i, { emoji: '🍪', category: 'wafer', bgClass: 'bg-amber-50' }],
-  [/club social|biscoito|cookie/i, { emoji: '🥨', category: 'salgadinho', bgClass: 'bg-yellow-50' }],
-  [/amendoim|castanha|nuts/i, { emoji: '🥜', category: 'amendoim', bgClass: 'bg-orange-50' }],
+  [/\bágua|agua\b/i, { emoji: '💧', category: 'agua', bgClass: 'bg-white' }],
+  [/red bull|monster|energ/i, { emoji: '⚡', category: 'energetico', bgClass: 'bg-white' }],
+  [/powerade|gatorade|isotôn/i, { emoji: '🏃', category: 'isotonico', bgClass: 'bg-white' }],
+  [/coca|refri|cola/i, { emoji: '🥤', category: 'refri', bgClass: 'bg-white' }],
+  [/chá|mate|bear mate/i, { emoji: '🍵', category: 'cha', bgClass: 'bg-white' }],
+  [/kit kat|bis|m\&m|mms/i, { emoji: '🍫', category: 'choc', bgClass: 'bg-white' }],
+  [/barra.*(cereal|protein|whey|crisp|delicio|buenissimo|topway|ftw|nutry)/i, { emoji: '🌾', category: 'barra', bgClass: 'bg-white' }],
+  [/halls|mentos|bala/i, { emoji: '🍬', category: 'bala', bgClass: 'bg-white' }],
+  [/wafer/i, { emoji: '🍪', category: 'wafer', bgClass: 'bg-white' }],
+  [/club social|biscoito|cookie/i, { emoji: '🥨', category: 'salgadinho', bgClass: 'bg-white' }],
+  [/amendoim|castanha|nuts/i, { emoji: '🥜', category: 'amendoim', bgClass: 'bg-white' }],
 ];
 
-const DEFAULT: ProductMeta = { emoji: '📦', category: 'outro', bgClass: 'bg-navy-50' };
+const DEFAULT: ProductMeta = { emoji: '📦', category: 'outro', bgClass: 'bg-white' };
 
 export function getProductMeta(productName: string | null | undefined): ProductMeta {
   if (!productName) return DEFAULT;
