@@ -788,6 +788,87 @@ export async function runAgent(input: {
       }
     });
 
+    // ============================================================
+    // Cascata inline (Luís pediu — wakeups MAILBOX durante /chat
+    // processam imediato em vez de esperar cron de 15min)
+    // ============================================================
+    // Aplica APENAS quando trigger original é ON_DEMAND (chat humano)
+    // OU quando essa run JÁ está em cascata (preserva o lote inline).
+    //
+    // Limites:
+    // - Max 5 wakeups processados por cascata (evita explosão)
+    // - Timeout: 45s desde início da run inicial (cabe em webhook 60-90s)
+    // - cascadeDepth crescente por hop pra blindar loops (já existe handoffDepth também)
+    let totalCost = costUsd;
+    const cascadeOrigin = (input.payload as { cascadeOrigin?: number } | undefined)?.cascadeOrigin;
+    const isOnDemand = input.trigger === 'ON_DEMAND';
+    const shouldCascade = isOnDemand || (cascadeOrigin !== undefined);
+    const t0 = cascadeOrigin ?? Date.now();
+    let cascadedRuns = 0;
+
+    if (shouldCascade) {
+      const MAX_CASCADE = 5;
+      const BUDGET_MS = 45_000;
+      const runStartedAt = run.startedAt;
+
+      for (let i = 0; i < MAX_CASCADE; i++) {
+        const elapsed = Date.now() - t0;
+        if (elapsed > BUDGET_MS) {
+          console.log(`[runtime] cascade budget esgotado em ${elapsed}ms — wakeups restantes ficam pro cron`);
+          break;
+        }
+
+        // Pega wakeups RECÉM-CRIADOS (durante esta cascade), status=QUEUED, agente ativo.
+        // Ignora wakeups antigos pra não estourar budget processando fila de cron.
+        const next = await prisma.agentWakeupRequest.findFirst({
+          where: {
+            status: 'QUEUED',
+            createdAt: { gte: runStartedAt },
+            agent: { active: true, paused: false },
+          },
+          orderBy: { createdAt: 'asc' },
+          include: { agent: { select: { id: true, slug: true } } },
+        });
+        if (!next) break;
+
+        // Claim atômico (single row update) — evita 2 cascades pegando o mesmo
+        const claimed = await prisma.agentWakeupRequest.updateMany({
+          where: { id: next.id, status: 'QUEUED' },
+          data: { status: 'CLAIMED', claimedAt: new Date() },
+        });
+        if (claimed.count === 0) continue; // outro tick pegou primeiro
+
+        try {
+          const cascade = await runAgent({
+            agentSlug: next.agent.slug,
+            trigger: next.trigger,
+            triggerRef: next.triggerRef ?? undefined,
+            payload: {
+              ...((next.payload as Record<string, unknown> | null) ?? {}),
+              cascadeOrigin: t0, // preserva timestamp original pra budget continuar valendo
+            },
+          });
+          totalCost += cascade.result.costUsd;
+          cascadedRuns++;
+          await prisma.agentWakeupRequest.update({
+            where: { id: next.id },
+            data: { status: 'COMPLETED', completedAt: new Date(), processedByRunId: cascade.runId },
+          });
+        } catch (cascadeErr) {
+          console.warn(`[runtime] cascade ${next.agent.slug} failed:`, cascadeErr);
+          await prisma.agentWakeupRequest.update({
+            where: { id: next.id },
+            data: { status: 'FAILED', completedAt: new Date() },
+          });
+          // Continua tentando outros wakeups
+        }
+      }
+
+      if (cascadedRuns > 0) {
+        console.log(`[runtime] cascade ${cascadedRuns} runs · $${(totalCost - costUsd).toFixed(4)} extra`);
+      }
+    }
+
     return {
       runId: run.id,
       result: {
@@ -797,7 +878,7 @@ export async function runAgent(input: {
         newMessages: parsed.newMessages,
         newRecalls: parsed.newRecalls,
         nextAgentSlug: parsed.nextAgentSlug,
-        costUsd,
+        costUsd: totalCost, // Inclui cascata
         tokensIn,
         tokensOut,
       },

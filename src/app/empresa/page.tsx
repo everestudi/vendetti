@@ -18,6 +18,7 @@ import { EmpresaFeed } from '@/components/EmpresaFeed';
 import { PanicButton } from '@/components/PanicButton';
 import { ChatVendetti } from '@/components/ChatVendetti';
 import { PendingApprovals } from '@/components/PendingApprovals';
+import { WakeupQueueBadge } from '@/components/WakeupQueueBadge';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 10;
@@ -69,6 +70,22 @@ export default async function EmpresaPage() {
       orderBy: { createdAt: 'desc' },
       take: 10,
       select: { id: true, kind: true, level: true, summary: true, rationale: true, createdAt: true },
+    }),
+  ]);
+
+  // Wakeups QUEUED + último cron run pra mostrar status da fila visualmente
+  const [queuedWakeups, oldestQueued, lastCronTick] = await Promise.all([
+    prisma.agentWakeupRequest.count({ where: { status: 'QUEUED' } }),
+    prisma.agentWakeupRequest.findFirst({
+      where: { status: 'QUEUED' },
+      orderBy: { createdAt: 'asc' },
+      include: { agent: { select: { slug: true, name: true, emoji: true } } },
+    }),
+    // Último workflow GH agents-tick que rodou
+    prisma.workerRun.findFirst({
+      where: { name: { in: ['agents_tick', 'mara_sync'] } },
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true, name: true },
     }),
   ]);
 
@@ -145,6 +162,25 @@ export default async function EmpresaPage() {
           )}
         </div>
       </header>
+
+      {/* WAKEUPS PENDENTES — badge laranja quando há fila aguardando cron */}
+      {queuedWakeups > 0 && (
+        <div className="mb-4">
+          <WakeupQueueBadge
+            queuedCount={queuedWakeups}
+            oldestQueued={
+              oldestQueued
+                ? {
+                    createdAt: oldestQueued.createdAt.toISOString(),
+                    agentSlug: oldestQueued.agent?.slug ?? null,
+                    agentName: oldestQueued.agent?.name ?? null,
+                    agentEmoji: oldestQueued.agent?.emoji ?? null,
+                  }
+                : null
+            }
+          />
+        </div>
+      )}
 
       {/* PENDENTES DE APROVAÇÃO — aparece destacado entre header e grid */}
       {(pendingApprovalMsgs.length > 0 || pendingDecisions.length > 0) && (
