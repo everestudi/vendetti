@@ -915,21 +915,28 @@ export const rita_send_grupo_operacao = tool({
   },
 });
 
+/**
+ * ⛔ DEPRECATED — não exposto a nenhum agente.
+ *
+ * Antes: Rita podia mandar WhatsApp direto pro Luís via Z-API.
+ * Pivot arquitetural (Luís pediu 2026-05-20): Augusto é o ÚNICO ponto de
+ * contato humano. Subagentes não falam direto.
+ *
+ * Mantida no código pra audit, mas removida de Rita.toolsAllowed.
+ * Defense in depth: executor lança erro mesmo se alguém tentar chamar.
+ */
 export const rita_send_luis = tool({
   description:
-    'Manda mensagem direta pro WhatsApp do Luís (LUIS_PHONE). Use pra alertas urgentes que NÃO devem ir pro grupo, ou pra "ping" se ele tá vendo o dashboard. Mantenha curto.',
+    '[DEPRECATED — não chamar] Antes: WhatsApp direto pro Luís. Agora: SÓ Augusto fala com Luís via augusto_notify_luis. Subagentes mandam mensagem pra Augusto consolidar.',
   inputSchema: z.object({
     message: z.string().min(5).max(500),
   }),
-  execute: async ({ message }) => {
-    const luis = await prisma.secret.findUnique({ where: { key: 'LUIS_PHONE' } });
-    if (!luis) return { from: 'Rita', error: 'LUIS_PHONE não configurado' };
-    // Decifra (não posso usar getSecret aqui pra evitar dependency cycle)
-    const { decrypt } = await import('../crypto');
-    const phone = decrypt(luis.value);
-    const r = await sendText(phone, message);
-    if (!r.ok) return { from: 'Rita', error: r.error };
-    return { from: 'Rita · Operações', ok: true, messageId: r.messageId };
+  execute: async () => {
+    return {
+      error:
+        'BLOQUEADO: rita_send_luis foi deprecated. Subagentes não falam direto com Luís humano. Mande pro Augusto via agent_send_message({to:"augusto", kind:"ALERT|NOTE"}). Ele decide se escala via augusto_notify_luis (WhatsApp).',
+      from: 'Rita · BLOQUEADO',
+    };
   },
 });
 
