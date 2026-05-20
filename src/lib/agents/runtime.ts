@@ -255,11 +255,15 @@ function parseAgentOutput(raw: string): {
 
 function splitSections(md: string): Record<string, string> {
   const out: Record<string, string> = {};
-  // Match "## SectionName\n..." até próximo "## " ou EOF
-  const re = /^##\s+(.+?)\s*$([\s\S]*?)(?=^##\s+|\Z)/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(md)) !== null) {
-    out[m[1].toLowerCase().trim()] = m[2].trim();
+  // Split antes de cada "## " — mantém o título junto do conteúdo.
+  // Mais robusto que regex com lookahead — JS não tem \Z e o lookbehind do
+  // multiline mode é frágil.
+  const parts = md.split(/(?=^##\s+)/m);
+  for (const part of parts) {
+    const m = part.match(/^##\s+([^\n]+)\n?([\s\S]*)/);
+    if (m) {
+      out[m[1].toLowerCase().trim()] = m[2].trim();
+    }
   }
   return out;
 }
@@ -437,6 +441,24 @@ export async function runAgent(input: {
         await tx.agentMemoryRecall.updateMany({
           where: { id: { in: recalls.map((r) => r.id) } },
           data: { hitCount: { increment: 1 }, lastUsedAt: new Date() },
+        });
+      }
+
+      // Se foi ON_DEMAND com threadId, cria msg de resposta direta na thread
+      // (humano fica como toAgentId=null pra UI do /chat ler).
+      // Body = outputMd completo (a "Resposta / Ação" parseada).
+      const threadId = typeof input.payload?.threadId === 'string' ? input.payload.threadId : null;
+      if (input.trigger === 'ON_DEMAND' && threadId && parsed.outputMd) {
+        await tx.agentMessage.create({
+          data: {
+            fromAgentId: agent.id,
+            toAgentId: null, // humano não é Agent — null = direto pro thread/humano
+            threadId,
+            kind: 'NOTE',
+            body: parsed.outputMd,
+            triggeredByRunId: run.id,
+            status: 'DELIVERED',
+          },
         });
       }
 
