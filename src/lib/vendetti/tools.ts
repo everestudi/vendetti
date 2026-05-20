@@ -945,6 +945,77 @@ export const refetch_product_image = tool({
 });
 
 // ============================================================
+// Augusto · canal único humano (WhatsApp + thread)
+// ============================================================
+
+export const augusto_notify_luis = tool({
+  description:
+    'AUGUSTO ONLY: notifica o Luís via WhatsApp (Z-API outbound) + cria msg na thread luis-augusto. Use quando precisar de resposta rápida do Luís OU quando tiver briefing que ele precise ver fora do /chat. Body curto (1-3 frases), telegráfico. Se for pergunta que espera sim/não/aguarde, marca needsReply=true.',
+  inputSchema: z.object({
+    body: z
+      .string()
+      .min(5)
+      .max(800)
+      .describe(
+        'Texto da notificação. Curto, direto. Termina com pergunta clara se precisar resposta (ex: "Aprova? sim/não/aguarde").',
+      ),
+    urgency: z
+      .enum(['normal', 'urgent'])
+      .default('normal')
+      .describe('urgent = adiciona 🚨 no início; normal = adiciona 🎩 (sua assinatura).'),
+    needsReply: z.boolean().default(false).describe('true = msg vira kind=QUESTION na UI, esperando resposta.'),
+  }),
+  execute: async ({ body, urgency, needsReply }) => {
+    const luisPhone = await getSecret('LUIS_PHONE');
+    if (!luisPhone) {
+      return { error: 'LUIS_PHONE não configurado em /settings — não consigo notificar.' };
+    }
+    const augusto = await prisma.agent.findUnique({ where: { slug: 'augusto' } });
+    if (!augusto) {
+      return { error: 'agente augusto não está no DB' };
+    }
+
+    // Prefix por urgency
+    const prefix = urgency === 'urgent' ? '🚨 *URGENTE*' : '🎩 *Augusto*';
+    const fullBody = `${prefix}\n\n${body}`;
+
+    // 1) Envia via Z-API
+    const { sendText } = await import('../zapi/send');
+    const sendResult = await sendText(luisPhone, fullBody);
+
+    // 2) Cria AgentMessage na thread luis-augusto (UI consegue ver)
+    const msg = await prisma.agentMessage.create({
+      data: {
+        fromAgentId: augusto.id,
+        toAgentId: null, // pro humano (Luís)
+        threadId: 'luis-augusto',
+        kind: needsReply ? 'QUESTION' : 'NOTE',
+        body,
+        refs: {
+          channel: 'whatsapp',
+          urgency,
+          needsReply,
+          zapiMessageId: sendResult.ok ? sendResult.messageId : null,
+          zapiError: sendResult.ok ? null : sendResult.error,
+        },
+        status: 'DELIVERED',
+      },
+    });
+
+    return {
+      ok: sendResult.ok,
+      from: 'Augusto · canal WhatsApp',
+      messageId: msg.id,
+      zapiMessageId: sendResult.ok ? sendResult.messageId : null,
+      zapiError: sendResult.ok ? null : sendResult.error,
+      note: needsReply
+        ? 'Notificação WhatsApp enviada. Aguarde resposta do Luís (vai chegar via webhook).'
+        : 'Notificação WhatsApp enviada (informativa, sem pedir resposta).',
+    };
+  },
+});
+
+// ============================================================
 // Zelda · token watchdog (audita custos dos agentes)
 // ============================================================
 
@@ -1205,4 +1276,5 @@ export const VENDETTI_TOOLS = {
   gabi_read_repo_file,
   gabi_recent_runs,
   gabi_create_github_issue,
+  augusto_notify_luis,
 } as const;

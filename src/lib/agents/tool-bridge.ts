@@ -149,6 +149,19 @@ const INTERNAL_TOOLS: Record<string, ToolExecutor & { def: AnthropicToolDef }> =
     execute: async (input, ctx) => {
       const parsed = agentSendMessageSchema.parse(input);
       const to = parsed.to.toLowerCase().trim();
+
+      // GUARD RAIL: subagentes (não-Augusto) NÃO podem mandar direto pra "luis".
+      // Augusto é o único filtro humano. Subagente que tentar é redirecionado.
+      // Exceção: Rita pode (rita_send_luis é canal Z-API dela direto, mas isso é
+      // OUTRA tool — agent_send_message é mailbox interno).
+      if (to === 'luis' && ctx.agentSlug !== 'augusto') {
+        return {
+          error: 'BLOQUEADO: apenas Augusto fala direto com Luís humano. Mande pra Augusto com kind=ALERT/INSIGHT/PROPOSAL — ele decide se escala.',
+          hint: `Reenvie: agent_send_message({ to: "augusto", kind: "${parsed.kind}", body: "${parsed.body.slice(0, 100)}..." })`,
+          subagent: ctx.agentSlug,
+        };
+      }
+
       const toSlug = to === 'luis' || to === 'broadcast' ? null : to;
       ctx.drafts.messages.push({
         toSlug,

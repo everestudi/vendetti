@@ -48,14 +48,16 @@ export default async function EmpresaPage() {
       where: { active: true },
       _sum: { spentUsdMonth: true, budgetUsdMonth: true },
     }),
-    // Mensagens PROPOSAL/REQUEST/QUESTION direcionadas a Luís (broadcast com fromAgent
-    // ou direcionadas pro humano) e ainda não actioned/dismissed
+    // Mensagens pendentes da aprovação do Luís — APENAS do Augusto (canal único).
+    // Subagentes mandam pra Augusto, ele decide o que escalar com kind=QUESTION
+    // (espera resposta) ou ALERT (urgente). Outros kinds (NOTE/INSIGHT) só ficam
+    // no feed sem botão de ação.
     prisma.agentMessage.findMany({
       where: {
-        kind: { in: ['PROPOSAL', 'REQUEST', 'QUESTION'] },
+        kind: { in: ['QUESTION', 'ALERT', 'PROPOSAL', 'REQUEST'] },
         status: { in: ['DELIVERED', 'READ'] },
-        toAgentId: null, // broadcast — Luís vê
-        fromAgentId: { not: null }, // vem de agente, não do próprio Luís
+        toAgentId: null, // pro humano (Luís)
+        fromAgent: { slug: 'augusto' }, // SÓ do Augusto — subagentes não escalam direto
       },
       orderBy: { createdAt: 'desc' },
       take: 20,

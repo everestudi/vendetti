@@ -186,17 +186,78 @@ export async function POST(req: Request) {
       return NextResponse.json({ route: 'admin-nfe', ...r });
     }
     if (effectiveText) {
+      // 1) Tenta comandos antigos primeiro (/listar, /assumir, /dispensar, /aprovar)
       const cmd = await handleAdminCommand(effectiveText);
       if (cmd.handled) {
         if (cmd.reply) await sendText(body.phone, cmd.reply);
         return NextResponse.json({ ok: true, route: 'admin-cmd', reply: cmd.reply });
       }
-      // Texto não-reconhecido — só loga
-      return NextResponse.json({
-        ok: true,
-        route: 'admin-text',
-        ignored: 'comando não reconhecido (use /listar, /assumir, /dispensar, /aprovar)',
-      });
+
+      // 2) Texto livre do Luís → roteia pro Augusto via mailbox + wakeup
+      try {
+        const augusto = await prisma.agent.findUnique({ where: { slug: 'augusto' } });
+        if (!augusto) {
+          await sendText(body.phone, '⚠️ Augusto não tá ativo. Seed os agentes em /empresa.');
+          return NextResponse.json({ ok: true, route: 'admin-text', error: 'augusto-not-seeded' });
+        }
+        if (augusto.paused) {
+          await sendText(body.phone, '⏸ Empresa pausada. Retoma em /empresa pra eu responder.');
+          return NextResponse.json({ ok: true, route: 'admin-text', error: 'augusto-paused' });
+        }
+
+        // Cria msg do Luís → Augusto na thread luis-augusto
+        const msg = await prisma.agentMessage.create({
+          data: {
+            fromAgentId: null, // Luís humano
+            toAgentId: augusto.id,
+            threadId: 'luis-augusto',
+            kind: 'NOTE',
+            body: effectiveText,
+            refs: { channel: 'whatsapp', zapiMessageId: body.messageId },
+            status: 'DELIVERED',
+          },
+        });
+
+        // Enfileira wakeup
+        const { enqueueWakeup } = await import('@/lib/agents/runtime');
+        await enqueueWakeup({
+          agentSlug: 'augusto',
+          trigger: 'MAILBOX',
+          triggerRef: msg.id,
+          idempotencyKey: `whatsapp:${msg.id}`,
+          payload: { messageId: msg.id, threadId: 'luis-augusto', channel: 'whatsapp' },
+        });
+
+        // Fire-and-forget: dispara /api/tick pra processar imediato (não bloqueia o webhook)
+        const cronSecret = await getSecret('CRON_SECRET');
+        if (cronSecret) {
+          const tickUrl = `${new URL(req.url).origin}/api/tick`;
+          fetch(tickUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${cronSecret}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ maxRuns: 1 }),
+          }).catch((e) => console.warn('[admin-text tick fire-and-forget]', e));
+        }
+
+        // Não responde nada via Z-API agora — Augusto vai responder quando processar
+        // (via augusto_notify_luis tool).
+        return NextResponse.json({
+          ok: true,
+          route: 'admin-text-to-augusto',
+          messageId: msg.id,
+          note: 'Mensagem encaminhada ao Augusto. Resposta dele virá via Z-API (augusto_notify_luis) ou só na UI /empresa.',
+        });
+      } catch (e) {
+        console.error('[admin-text → augusto]', e);
+        return NextResponse.json({
+          ok: false,
+          route: 'admin-text',
+          error: e instanceof Error ? e.message : String(e),
+        });
+      }
     }
     return NextResponse.json({ ok: true, route: 'admin-empty' });
   }
