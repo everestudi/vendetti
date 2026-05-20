@@ -183,196 +183,15 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
       </div>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
 
-      {/* Editor de items (só pra Decisions Weverton) */}
+      {/* Tabela simples (Weverton) — slot · vendtef · weverton · qty-slot · qty-mandada · sugestão · skip */}
       {isWeverton && items.length > 0 && (
-        <form action={updateDecisionItems.bind(null, d.id)} className="mt-4 rounded border border-amber-200 bg-white p-3">
-          <div className="mb-2 flex items-center justify-between">
-            <h4 className="text-xs font-semibold uppercase tracking-wide text-navy/60">
-              Revisar items ({items.length} slots)
-            </h4>
-            <button
-              type="submit"
-              className="rounded border border-navy/20 px-2 py-0.5 text-[11px] font-medium text-navy hover:bg-navy/5"
-            >
-              💾 Atualizar
-            </button>
-          </div>
-          <p className="mb-3 text-[10px] text-navy/55">
-            ⚠️ Para slots onde o Weverton trocou de produto: preencha "produto alvo" com o nome novo. O sistema te avisa se o produto já existe (vai usar) ou se é novo (precisa preencher custo + categoria pra cadastrar no Vendtef).
-            Marque "skip" pra pular um slot sem cancelar a Decision inteira.
-          </p>
-          <div className="space-y-2">
-            {items.map((it, i) => {
-              const confidence = it.matchConfidence ?? 'no-slot';
-              const confCls =
-                confidence === 'high' ? 'bg-emerald-50 text-emerald-700' :
-                confidence === 'mid' ? 'bg-amber-50 text-amber-700' :
-                'bg-rose-50 text-rose-700';
-              const defaultTarget = it.targetProduct ?? (confidence === 'low' ? (it.productGuess ?? '') : '');
-              const skuMatch = defaultTarget ? matchSku(defaultTarget, skus) : null;
-              const isNew = defaultTarget && (!skuMatch || skuMatch.confidence === 'none' || skuMatch.confidence === 'low');
-              const willSwap = defaultTarget && !it.skip;
-              const llm = it.llmReview;
-              const llmBadge = llm ? LLM_ACTION_BADGE[llm.recommendedAction] : null;
-              return (
-                <div key={i} className={`rounded border ${it.skip ? 'border-navy/10 bg-navy/5 opacity-50' : willSwap ? 'border-amber-300 bg-amber-50/40' : it.aliasMatch ? 'border-emerald-300 bg-emerald-50/30' : 'border-navy/15 bg-white'} p-2`}>
-                  {/* 🎯 ALIAS MATCH (determinístico, sem LLM) — você ensinou antes */}
-                  {it.aliasMatch && (
-                    <div className="mb-2 rounded bg-emerald-100 px-2 py-1 text-[11px] text-emerald-900">
-                      <strong>🎯 alias salvo</strong> · "{it.productGuess}" → <strong>{it.aliasMatch.skuName}</strong>
-                      <span className="ml-1 text-[10px] opacity-70">(match deterministic, sem LLM)</span>
-                    </div>
-                  )}
-
-                  {/* 🤖 LLM review banner (quando houve análise da Haiku, sem alias) */}
-                  {!it.aliasMatch && llm && llmBadge && (
-                    <div className={`mb-2 rounded px-2 py-1 text-[11px] ${llmBadge.cls}`}>
-                      <div className="flex items-baseline justify-between gap-2">
-                        <strong>
-                          {llmBadge.emoji} 🤖 {llmBadge.label}
-                          {' '}
-                          <span className="font-mono text-[10px] opacity-70">({llm.confidence}%)</span>
-                        </strong>
-                        {llm.swapWithSlot && (
-                          <span className="font-mono text-[10px]">com slot {llm.swapWithSlot}</span>
-                        )}
-                      </div>
-                      <div className="mt-0.5 text-[10px] opacity-90">{llm.reasoning}</div>
-                      {llm.targetSkuName && (
-                        <div className="mt-0.5 text-[10px]">
-                          → sugere: <strong>{llm.targetSkuName}</strong>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  <div className="grid grid-cols-12 items-center gap-2 text-[11px]">
-                    <div className="col-span-1 font-mono text-base font-semibold text-navy">{it.slotPosition?.padStart(2, '0')}</div>
-                    <div className="col-span-3 text-navy/70">
-                      <div className="text-[10px] text-navy/45">no Vendtef hoje:</div>
-                      <div className="truncate" title={it.slotProduct ?? ''}>{it.slotProduct ?? '—'}</div>
-                    </div>
-                    <div className="col-span-3 text-navy/70">
-                      <div className="text-[10px] text-navy/45">Weverton mandou:</div>
-                      <div className="truncate" title={it.productGuess ?? ''}>{it.productGuess ?? '?'}</div>
-                    </div>
-                    <div className="col-span-1">
-                      <label className="block text-[10px] text-navy/45">qty</label>
-                      <input
-                        type="number"
-                        name={`qty_${i}`}
-                        defaultValue={it.qty}
-                        min={0}
-                        className="w-full rounded border border-navy/20 px-1 py-0.5 text-right font-mono"
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <label className="block text-[10px] text-navy/45">produto alvo (digite ou escolha do catálogo)</label>
-                      <input
-                        type="text"
-                        name={`target_${i}`}
-                        defaultValue={defaultTarget}
-                        list={`skus-${d.id}`}
-                        placeholder={confidence === 'high' ? 'sem troca · ou escolha do catálogo' : it.productGuess ?? ''}
-                        className="w-full rounded border border-navy/20 px-1 py-0.5"
-                      />
-                    </div>
-                    <div className="col-span-1 flex flex-col items-end gap-1">
-                      <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${confCls}`}>{confidence}</span>
-                      <label className="flex items-center gap-1 text-[10px] text-navy/55">
-                        <input type="checkbox" name={`skip_${i}`} defaultChecked={it.skip} /> skip
-                      </label>
-                    </div>
-                  </div>
-
-                  {/* Status do produto-alvo: existe ou é novo? */}
-                  {willSwap && (
-                    <div className="mt-2 rounded border border-navy/10 bg-white/80 p-2 text-[11px]">
-                      {skuMatch?.match && skuMatch.confidence !== 'low' && skuMatch.confidence !== 'none' ? (
-                        <div className="text-emerald-700">
-                          ✓ Vai usar produto existente:{' '}
-                          <strong>{skuMatch.match.name}</strong>{' '}
-                          <span className="text-emerald-700/60">(match {skuMatch.score}%, categoria: {skuMatch.match.category})</span>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                          <div className="text-amber-800">
-                            🆕 <strong>"{defaultTarget}"</strong> não tá no catálogo.
-                            {' '}<em className="text-rose-700">Cadastro manual — preencha os campos abaixo só se você (Luís) quer cadastrar agora.</em>
-                            {skuMatch?.match && (
-                              <span className="ml-1 text-navy/55">
-                                (mais próximo: "{skuMatch.match.name}" {skuMatch.score}% — se for esse, ajuste o nome acima)
-                              </span>
-                            )}
-                          </div>
-                          <div className="grid grid-cols-4 gap-2">
-                            <div>
-                              <label className="block text-[10px] text-navy/55">custo unit (R$)</label>
-                              <input
-                                type="number"
-                                step="0.01"
-                                name={`new_cost_${i}`}
-                                defaultValue={it.newProductData?.cost?.toString() ?? ''}
-                                placeholder="0,00"
-                                className="w-full rounded border border-amber-300 px-1 py-0.5"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-navy/55">categoria</label>
-                              <input
-                                type="text"
-                                name={`new_category_${i}`}
-                                defaultValue={it.newProductData?.category ?? ''}
-                                list={`cats-${d.id}`}
-                                placeholder="ex: bebida, barrinha"
-                                className="w-full rounded border border-amber-300 px-1 py-0.5"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-navy/55">fornecedor</label>
-                              <select
-                                name={`new_supplier_${i}`}
-                                defaultValue={it.newProductData?.supplier ?? 'ATACADAO'}
-                                className="w-full rounded border border-amber-300 px-1 py-0.5"
-                              >
-                                <option value="ATACADAO">Atacadão</option>
-                                <option value="VITTAL">Vittal</option>
-                                <option value="OUTRO">Outro</option>
-                              </select>
-                            </div>
-                            <div>
-                              <label className="block text-[10px] text-navy/55" title="Pula se Bruno já lançou NF-e desse produto. Caso contrário scraper lança entrada de estoque no Everest com a qty informada (=qty da reposição é o default)">
-                                entrada Everest (qty)
-                              </label>
-                              <input
-                                type="number"
-                                name={`new_entrada_qty_${i}`}
-                                defaultValue={it.newProductData?.entradaEstoqueQty?.toString() ?? ''}
-                                placeholder={`vazio = pula · ${it.qty ?? 1} sugerido`}
-                                min={0}
-                                className="w-full rounded border border-amber-300 px-1 py-0.5"
-                              />
-                            </div>
-                          </div>
-                          <p className="mt-1 text-[10px] text-navy/55">
-                            ℹ️ <strong>entrada Everest:</strong> deixa vazio se Bruno já cadastrou esse produto via NF-e. Senão preenche com a qty que tá disponível pra abastecer (scraper cria entrada de estoque no Everest antes de tentar abastecer a máquina, evita "produto sem estoque").
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-          <datalist id={`cats-${d.id}`}>
-            {categories.map((c) => <option key={c} value={c} />)}
-          </datalist>
-          {/* Datalist global de SKUs do catálogo — usado nos inputs target_${i} */}
-          <datalist id={`skus-${d.id}`}>
-            {skus.map((s) => <option key={s.id} value={s.name} />)}
-          </datalist>
-        </form>
+        <WevertonTable
+          d={d}
+          items={items}
+          skus={skus}
+          categories={categories}
+          mode={mode}
+        />
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
@@ -438,6 +257,177 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
         </details>
       </div>
     </article>
+  );
+}
+
+/**
+ * Tabela simplificada pra Decisions do Weverton.
+ *
+ * UX: Luís bate o olho em cada linha — dropdown vem PRÉ-SELECIONADO com a
+ * sugestão do alias/LLM/F1 (nesta ordem). Se errado, ele só troca.
+ *
+ * Modo inventory: divergência QTY-BD vs QTY-W exibida neutra (snapshot).
+ * Modo restock: divergência destacada (se BD tinha 4 e Weverton diz +5 = vendeu).
+ */
+function WevertonTable({
+  d,
+  items,
+  skus,
+  mode,
+}: {
+  d: Decision;
+  items: WevertonItem[];
+  skus: SkuLike[];
+  categories: string[];
+  mode: 'inventory' | 'restock';
+}) {
+  // SKUs em ordem alfabética pra dropdown
+  const skusSorted = [...skus].sort((a, b) => a.name.localeCompare(b.name));
+
+  // Pré-seleção: alias > LLM > F1 (slotSkuId) > vazio
+  function pickSuggestion(it: WevertonItem): { skuId: string; label: string; source: 'alias' | 'llm-abast' | 'llm-swap' | 'llm-slotswap' | 'f1' | 'human' } {
+    if (it.aliasMatch) {
+      return { skuId: it.aliasMatch.skuId, label: it.aliasMatch.skuName, source: 'alias' };
+    }
+    const llm = it.llmReview;
+    if (llm?.recommendedAction === 'abastecer_only') {
+      const skuId = llm.targetSkuId ?? (it as { slotSkuId?: string }).slotSkuId ?? '';
+      return { skuId, label: llm.targetSkuName ?? it.slotProduct ?? '', source: 'llm-abast' };
+    }
+    if (llm?.recommendedAction === 'product_swap' && llm.targetSkuId) {
+      return { skuId: llm.targetSkuId, label: llm.targetSkuName ?? '', source: 'llm-swap' };
+    }
+    if (llm?.recommendedAction === 'slot_swap_with' && llm.targetSkuId) {
+      return { skuId: llm.targetSkuId, label: `${llm.targetSkuName} (↔ slot ${llm.swapWithSlot})`, source: 'llm-slotswap' };
+    }
+    if (it.matchConfidence === 'high' && it.slotProduct) {
+      const sku = skus.find((s) => s.name === it.slotProduct);
+      return { skuId: sku?.id ?? '', label: it.slotProduct, source: 'f1' };
+    }
+    return { skuId: '', label: '', source: 'human' };
+  }
+
+  const SOURCE_BADGE: Record<string, { cls: string; emoji: string; label: string }> = {
+    alias: { cls: 'bg-emerald-100 text-emerald-800', emoji: '🎯', label: 'alias' },
+    'llm-abast': { cls: 'bg-blue-50 text-blue-800', emoji: '🤖', label: 'LLM' },
+    'llm-swap': { cls: 'bg-amber-100 text-amber-800', emoji: '🔄', label: 'troca' },
+    'llm-slotswap': { cls: 'bg-purple-100 text-purple-800', emoji: '↔️', label: 'inversão' },
+    f1: { cls: 'bg-emerald-50 text-emerald-700', emoji: '✓', label: 'OK' },
+    human: { cls: 'bg-rose-100 text-rose-800', emoji: '🙋', label: 'você decide' },
+  };
+
+  const totalUnits = items.reduce((s, i) => s + (i.qty ?? 0), 0);
+
+  return (
+    <form action={updateDecisionItems.bind(null, d.id)} className="mt-4">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <span className="text-navy/65">
+          {mode === 'inventory'
+            ? <>📋 <strong>Contagem</strong>: {items.length} slots reportados. Bata o olho — dropdown já vem pré-preenchido com a sugestão. Mude se estiver errado.</>
+            : <>📦 <strong>Reposição</strong>: {items.length} slots, +{totalUnits} unidades. Sugestão de SKU pré-preenchida — confirme o produto certo.</>}
+        </span>
+        <button
+          type="submit"
+          className="rounded border border-navy/20 px-2 py-0.5 text-[11px] font-medium text-navy hover:bg-navy/5"
+        >
+          💾 Salvar mudanças
+        </button>
+      </div>
+      <div className="overflow-x-auto rounded border border-navy/15 bg-white">
+        <table className="w-full text-[11px]">
+          <thead className="bg-navy/5 text-[10px] uppercase text-navy/55">
+            <tr>
+              <th className="px-2 py-1.5 text-left">slot</th>
+              <th className="px-2 py-1.5 text-left">no vendtef</th>
+              <th className="px-2 py-1.5 text-left">weverton mandou</th>
+              <th className="px-2 py-1.5 text-center" title="quantidade atual no banco">qty BD</th>
+              <th className="px-2 py-1.5 text-center" title="quantidade reportada pelo Weverton">qty W</th>
+              <th className="px-2 py-1.5 text-left">produto certo (escolha do catálogo)</th>
+              <th className="px-2 py-1.5 text-center">pular</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map((it, i) => {
+              const suggestion = pickSuggestion(it);
+              const badge = SOURCE_BADGE[suggestion.source];
+              const slotSkuId = (it as { slotSkuId?: string | null }).slotSkuId ?? null;
+              const currentQty = (it as { currentQty?: number | null }).currentQty ?? null;
+              // Pra restock: destaca divergência (qty mandada significa "abasteci +N")
+              // Pra inventory: snapshot, sem destaque
+              const showQtyDiff = mode === 'restock' && currentQty != null && it.qty != null;
+              const projected = showQtyDiff ? (currentQty ?? 0) + (it.qty ?? 0) : null;
+              const sold = mode === 'inventory' && currentQty != null && it.qty != null && it.qty < currentQty
+                ? currentQty - it.qty
+                : null;
+
+              return (
+                <tr key={i} className={`${it.skip ? 'opacity-40' : ''} border-t border-navy/10 align-top`}>
+                  <td className="px-2 py-1.5 font-mono text-base font-bold text-navy">
+                    {it.slotPosition?.padStart(2, '0')}
+                  </td>
+                  <td className="px-2 py-1.5 text-navy/75" title={it.slotProduct ?? ''}>
+                    <div className="max-w-[180px] truncate">{it.slotProduct ?? <em className="text-navy/40">vazio</em>}</div>
+                  </td>
+                  <td className="px-2 py-1.5 text-navy/75" title={it.productGuess ?? ''}>
+                    <div className="max-w-[160px] truncate">{it.productGuess ?? '?'}</div>
+                  </td>
+                  <td className="px-2 py-1.5 text-center font-mono text-navy/60">
+                    {currentQty ?? '—'}
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <input
+                      type="number"
+                      name={`qty_${i}`}
+                      defaultValue={it.qty}
+                      min={0}
+                      className="w-14 rounded border border-navy/20 px-1 py-0.5 text-right font-mono"
+                    />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex items-center gap-1">
+                      <select
+                        name={`target_${i}`}
+                        defaultValue={suggestion.skuId}
+                        className="w-full max-w-[260px] rounded border border-navy/20 px-1 py-0.5 text-[11px]"
+                      >
+                        <option value="">— sem troca (mantém atual) —</option>
+                        {skusSorted.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                      {badge && (
+                        <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${badge.cls}`} title={suggestion.label || badge.label}>
+                          {badge.emoji}
+                        </span>
+                      )}
+                    </div>
+                    {/* Anotações secundárias */}
+                    {mode === 'restock' && projected != null && (
+                      <div className="mt-0.5 text-[9px] text-navy/45">
+                        BD: {currentQty} + {it.qty} = {projected} após abastecer
+                      </div>
+                    )}
+                    {sold != null && sold > 0 && (
+                      <div className="mt-0.5 text-[9px] text-navy/45 italic">
+                        {sold} vendido(s) desde último sync (ou ajuste físico)
+                      </div>
+                    )}
+                  </td>
+                  <td className="px-2 py-1.5 text-center">
+                    <input type="checkbox" name={`skip_${i}`} defaultChecked={it.skip} />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[10px] text-navy/55">
+        ℹ️ <strong>Legenda</strong>: 🎯 alias salvo · 🤖 LLM sugere · ↔️ inversão de slot detectada · ✓ match direto · 🙋 você decide.
+        {' '}Quando você troca o produto e aprova, o sistema <strong>aprende</strong> esse mapeamento (alias) — próxima vez já reconhece sem perguntar.
+        {' '}Pra cadastrar produto novo, use o /settings ou me peça.
+      </p>
+    </form>
   );
 }
 

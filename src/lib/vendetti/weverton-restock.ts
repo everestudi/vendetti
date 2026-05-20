@@ -22,6 +22,10 @@ export interface ParsedItem {
   productGuess: string;
   qty: number;
   slotProduct: string | null;
+  /// Quantidade atual no banco (Slot.currentQty) — pra UI mostrar comparação.
+  currentQty: number | null;
+  /// SKU ID do produto atualmente no slot (pra pré-selecionar no dropdown).
+  slotSkuId: string | null;
   matchConfidence: 'high' | 'mid' | 'low' | 'no-slot';
   /// Se bateu via SkuAlias deterministicamente, não precisa de LLM review.
   aliasMatch?: { skuId: string; skuName: string; aliasId: string } | null;
@@ -83,6 +87,8 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
     productGuess = productGuess.trim().replace(/\s+/g, ' ');
 
     let slotProduct: string | null = null;
+    let currentQty: number | null = null;
+    let slotSkuId: string | null = null;
     let matchConfidence: ParsedItem['matchConfidence'] = 'no-slot';
     let aliasMatch: ParsedItem['aliasMatch'] = null;
 
@@ -92,6 +98,8 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
         include: { sku: true },
       });
       slotProduct = slot?.sku?.name ?? null;
+      currentQty = slot?.currentQty ?? null;
+      slotSkuId = slot?.skuId ?? null;
 
       // === ALIAS DETERMINÍSTICO (aprendizado real) ===
       // Antes de F1/LLM, checa se Luís já corrigiu esse texto pra um SKU.
@@ -131,7 +139,16 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
         else matchConfidence = 'low';
       }
     }
-    items.push({ slotPosition, productGuess, qty, slotProduct, matchConfidence, aliasMatch });
+    items.push({
+      slotPosition,
+      productGuess,
+      qty,
+      slotProduct,
+      currentQty,
+      slotSkuId,
+      matchConfidence,
+      aliasMatch,
+    });
   }
 
   const lowConfidence = items.filter((i) => i.matchConfidence === 'low' || i.matchConfidence === 'no-slot');
