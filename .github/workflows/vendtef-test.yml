@@ -46,6 +46,15 @@ jobs:
           echo "test=${ACTION#vendtef-test-}" >> $GITHUB_OUTPUT
           echo "Running test: ${ACTION#vendtef-test-}"
 
+      # Pre-step: login + save session (necessário pros outros scrapers).
+      # Em GH Actions cada runner é isolado, sem state. Cada test não-login
+      # roda login primeiro pra criar a session file.
+      - name: Pre-login (cria session pros tests que não são login)
+        if: steps.t.outputs.test != 'login'
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/scrapers/vendtef/login.ts
+
       - name: Run login test
         if: steps.t.outputs.test == 'login'
         env:
@@ -58,11 +67,15 @@ jobs:
           HEADLESS: 'true'
         run: npx tsx src/scrapers/vendtef/inventory.ts
 
-      - name: Run sales test
+      # Sales: scraper standalone NÃO existe (package.json tinha referência
+      # quebrada). Mara faz sales via extract+load pipeline inteiro.
+      # Pra testar sales path isolado, rodamos `selecoes.ts` (lista vendas
+      # por seleção, parte do pipeline da Mara).
+      - name: Run sales test (selecoes report)
         if: steps.t.outputs.test == 'sales'
         env:
           HEADLESS: 'true'
-        run: npx tsx src/scrapers/vendtef/sales.ts
+        run: npx tsx src/scrapers/vendtef/selecoes.ts
 
       - name: Run explore test
         if: steps.t.outputs.test == 'explore'
