@@ -105,19 +105,52 @@ export class AgentRuntimeError extends Error {
   }
 }
 
-/** Preço por 1M tokens (input/output) — atualizar quando Anthropic mudar tabela. */
-export const MODEL_PRICES: Record<string, { in: number; out: number }> = {
-  'claude-opus-4-7':            { in: 15, out: 75 },
-  'claude-opus-4-7-20251022':   { in: 15, out: 75 },
-  'claude-sonnet-4-5':          { in: 3,  out: 15 },
-  'claude-sonnet-4-5-20250929': { in: 3,  out: 15 },
-  'claude-haiku-4-5':           { in: 0.8, out: 4 },
-  'claude-haiku-4-5-20251001':  { in: 0.8, out: 4 },
+/**
+ * Preço por 1M tokens (input/output/cache_write/cache_read).
+ * - `in` = input normal
+ * - `out` = output normal
+ * - `cacheWrite` = quando escreve no prompt cache (1.25x do input)
+ * - `cacheRead` = quando lê do cache (0.10x do input — 90% economia)
+ * Tabela Anthropic 2026-05. Atualizar se mudar.
+ */
+export const MODEL_PRICES: Record<string, { in: number; out: number; cacheWrite: number; cacheRead: number }> = {
+  'claude-opus-4-7':            { in: 15,  out: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  'claude-opus-4-7-20251022':   { in: 15,  out: 75, cacheWrite: 18.75, cacheRead: 1.5 },
+  'claude-sonnet-4-5':          { in: 3,   out: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
+  'claude-sonnet-4-5-20250929': { in: 3,   out: 15, cacheWrite: 3.75,  cacheRead: 0.3 },
+  'claude-haiku-4-5':           { in: 0.8, out: 4,  cacheWrite: 1.0,   cacheRead: 0.08 },
+  'claude-haiku-4-5-20251001':  { in: 0.8, out: 4,  cacheWrite: 1.0,   cacheRead: 0.08 },
 };
 
-/** Calcula custo USD de uma run. */
-export function calcCost(model: string, tokensIn: number, tokensOut: number): number {
+export interface CostUsageBreakdown {
+  /** Tokens "normais" de input — não cacheados nem escrevendo cache. */
+  tokensIn: number;
+  /** Tokens output. */
+  tokensOut: number;
+  /** Tokens escritos no cache (1ª run com cache_control). Custa +25%. */
+  cacheWriteTokens: number;
+  /** Tokens lidos do cache (runs subsequentes). Custa -90%. */
+  cacheReadTokens: number;
+}
+
+/**
+ * Calcula custo USD considerando prompt caching.
+ *
+ * Backward-compat: aceita formato antigo (tokensIn, tokensOut) sem breakdown.
+ * Quando vier breakdown, contabiliza cada categoria separadamente.
+ */
+export function calcCost(model: string, tokensIn: number, tokensOut: number, usage?: CostUsageBreakdown): number {
   const p = MODEL_PRICES[model];
   if (!p) return 0;
+
+  if (usage) {
+    return (
+      usage.tokensIn * p.in +
+      usage.tokensOut * p.out +
+      usage.cacheWriteTokens * p.cacheWrite +
+      usage.cacheReadTokens * p.cacheRead
+    ) / 1_000_000;
+  }
+
   return (tokensIn * p.in + tokensOut * p.out) / 1_000_000;
 }

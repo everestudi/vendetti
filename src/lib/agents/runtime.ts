@@ -361,6 +361,8 @@ async function callAnthropicWithLoop(
   drafts: ToolExecutionContext['drafts'];
   tokensIn: number;
   tokensOut: number;
+  cacheWriteTokens: number;
+  cacheReadTokens: number;
   toolCallLogs: ToolCallLog[];
 }> {
   const client = new Anthropic({ apiKey });
@@ -383,12 +385,28 @@ async function callAnthropicWithLoop(
   const thinkingChunks: string[] = [];
   let totalIn = 0;
   let totalOut = 0;
+  let totalCacheWrite = 0;
+  let totalCacheRead = 0;
 
   for (let step = 0; step < maxSteps; step++) {
+    // Prompt caching: marca o system prompt como cacheable (ephemeral TTL 5min).
+    // Anthropic cacheia automaticamente o conjunto [tools + system até o último
+    // cache_control], o que cobre 5-15K tokens estáveis por agente. Cache hit
+    // economiza 90% do input cost; cache write custa +25% na 1ª call.
+    // Break-even em ~3 runs do mesmo agente em janela de 5min.
+    //
+    // Limitação: system precisa ser BYTE-EQUAL entre runs pra cache hit. Como
+    // promptCore + SHARED_RULES não mudam entre runs do mesmo agente, OK.
     const response = await client.messages.create({
       model: agent.model,
       max_tokens: 4096,
-      system: systemPrompt,
+      system: [
+        {
+          type: 'text' as const,
+          text: systemPrompt,
+          cache_control: { type: 'ephemeral' as const },
+        },
+      ],
       tools: tools.length > 0
         ? (tools.map((t) => ({
             name: t.name,
@@ -401,6 +419,14 @@ async function callAnthropicWithLoop(
 
     totalIn += response.usage.input_tokens;
     totalOut += response.usage.output_tokens;
+    // Anthropic retorna usage com cache stats quando cache_control é usado.
+    // Os campos podem ou não existir dependendo da versão do SDK — defensivo.
+    const usage = response.usage as typeof response.usage & {
+      cache_creation_input_tokens?: number;
+      cache_read_input_tokens?: number;
+    };
+    totalCacheWrite += usage.cache_creation_input_tokens ?? 0;
+    totalCacheRead += usage.cache_read_input_tokens ?? 0;
 
     // Coleta text + thinking blocks pra log/UI
     for (const block of response.content) {
@@ -487,6 +513,8 @@ async function callAnthropicWithLoop(
     drafts,
     tokensIn: totalIn,
     tokensOut: totalOut,
+    cacheWriteTokens: totalCacheWrite,
+    cacheReadTokens: totalCacheRead,
     toolCallLogs,
   };
 }
@@ -555,8 +583,24 @@ export async function runAgent(input: {
 
     // Agentic loop com tool calling nativo
     const loopResult = await callAnthropicWithLoop(apiKey, agent, systemPrompt, userMessage, run.id);
-    const { textOutput, thinking, drafts: toolDrafts, tokensIn, tokensOut, toolCallLogs: toolCalls } = loopResult;
-    const costUsd = calcCost(agent.model, tokensIn, tokensOut);
+    const {
+      textOutput,
+      thinking,
+      drafts: toolDrafts,
+      tokensIn,
+      tokensOut,
+      cacheWriteTokens,
+      cacheReadTokens,
+      toolCallLogs: toolCalls,
+    } = loopResult;
+    // calcCost com breakdown: tokensIn aqui exclui os cached, então não dupla-conta.
+    // Anthropic API: input_tokens = NOVOS tokens não-cacheados, cache_creation = escrita, cache_read = leitura.
+    const costUsd = calcCost(agent.model, tokensIn, tokensOut, {
+      tokensIn,
+      tokensOut,
+      cacheWriteTokens,
+      cacheReadTokens,
+    });
 
     // Parse fallback do output (caso modelo escreva markdown estruturado em vez
     // de chamar tools internas — agentes Haiku às vezes fazem isso)
