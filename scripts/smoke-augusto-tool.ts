@@ -7,24 +7,35 @@ import { prisma } from '../src/lib/db';
 import { runAgent } from '../src/lib/agents/runtime';
 
 async function main() {
+  const claudeCode = await prisma.agent.findUnique({ where: { slug: 'claude-code' } });
+  if (!claudeCode) {
+    console.error('claude-code não está no DB');
+    process.exit(1);
+  }
+  const augusto = await prisma.agent.findUnique({ where: { slug: 'augusto' } });
+  if (!augusto) {
+    console.error('augusto não está no DB');
+    process.exit(1);
+  }
+
   const msg = await prisma.agentMessage.create({
     data: {
-      fromAgentId: null,
-      toAgentId: (await prisma.agent.findUnique({ where: { slug: 'augusto' } }))!.id,
-      threadId: 'luis-augusto',
+      fromAgentId: claudeCode.id,
+      toAgentId: augusto.id,
+      threadId: 'claude-code-tests',
       kind: 'QUESTION',
-      body: 'Augusto, me dá um status curto da operação: chama mara_summary, infra_health, e me diz em 3 linhas o que vê (sem inventar contexto). Não precisa mandar mensagem pra ninguém — só me responde aqui.',
+      body: '[SMOKE TEST claude-code] Status curto: chama mara_summary + infra_health, me diz em 3 linhas o que vê. Sem inventar contexto.',
       status: 'DELIVERED',
     },
   });
-  console.log(`📩 Msg criada (id=${msg.id.slice(0, 12)})`);
+  console.log(`📩 Msg criada (id=${msg.id.slice(0, 12)}) sender: 🤖 claude-code`);
 
   const t0 = Date.now();
   const { runId, result } = await runAgent({
     agentSlug: 'augusto',
-    trigger: 'ON_DEMAND',
+    trigger: 'MAILBOX',
     triggerRef: msg.id,
-    payload: { messageId: msg.id, threadId: 'luis-augusto', userText: msg.body },
+    payload: { messageId: msg.id, threadId: 'claude-code-tests', source: 'claude-code-smoke' },
   });
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 

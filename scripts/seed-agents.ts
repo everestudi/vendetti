@@ -32,7 +32,8 @@ async function main() {
         toolsAllowed: seed.toolsAllowed,
         budgetUsdMonth: seed.budgetUsdMonth,
         reportsToSlug: seed.reportsToSlug,
-        active: true,
+        active: seed.active ?? true,
+        humanInLoop: seed.humanInLoop ?? true,
       },
       update: {
         name: seed.name,
@@ -44,6 +45,10 @@ async function main() {
         toolsAllowed: seed.toolsAllowed,
         budgetUsdMonth: seed.budgetUsdMonth,
         reportsToSlug: seed.reportsToSlug,
+        // active/humanInLoop NÃO atualizamos no update — uma vez seedado, Luís
+        // controla esses flags via UI. Exceção: claude-code é sempre forçado
+        // a active=false (identidade técnica, nunca deve ser ativada por engano).
+        ...(seed.slug === 'claude-code' ? { active: false, humanInLoop: false } : {}),
       },
     });
 

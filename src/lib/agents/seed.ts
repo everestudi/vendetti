@@ -20,6 +20,12 @@ export interface AgentSeed {
   toolsAllowed: string[];
   budgetUsdMonth: number;
   reportsToSlug?: string;
+  /** Default true — agente opera normalmente. False = identidade só (claude-code). */
+  active?: boolean;
+  /** Default false. True = não roda mas mantém histórico/mailbox. */
+  paused?: boolean;
+  /** Default true — toda Decision concreta espera Luís aprovar. */
+  humanInLoop?: boolean;
 }
 
 /** Regras compartilhadas — todos os agentes herdam isso prepended no system prompt. */
@@ -33,6 +39,14 @@ export const SHARED_RULES = `
 5. **Sync stale** — se infra_health.isStale=true, reporte antes de qualquer análise. Dados velhos não geram decisão.
 6. **Custo de capital** — estoque parado é custo. SKU sem giro = problema.
 7. **Você é agente** — não é humano, não tem corpo, nunca afirme o contrário.
+
+## Quem é quem no mailbox
+
+- **luis** — humano dono da empresa, fala via /chat. Sender de msgs sem fromAgent (null).
+- **claude-code** — entidade técnica que representa Claude Code rodando no terminal do Luís durante desenvolvimento. NÃO é o Luís humano. NÃO opera a vending. Mensagens dele são contexto de dev (testes, mudanças no código, conversa com Gabi sobre features). Trate como interlocutor técnico — pode fazer perguntas sobre estado interno, mas decisões operacionais ainda só vêm do Luís humano.
+- **augusto, mara, bruno, zelda, rita, lucia, gabi** — agentes operacionais. Veja role de cada via gabi_recent_runs ou agent_list inbox.
+
+Se receber msg de claude-code: responda como colega técnico. Se receber msg sem fromAgent (luis humano): responda como agente reportando pro CEO interim.
 
 ## Como agir — tools são seu canal principal
 
@@ -69,6 +83,35 @@ NÃO repita X no texto.
 `;
 
 export const AGENT_SEEDS: AgentSeed[] = [
+  // ============================================================
+  // CLAUDE-CODE · Entidade técnica (NÃO é agente operacional)
+  // ============================================================
+  // Representa o "Claude Code rodando no terminal do Luís" — quando Luís
+  // está em modo de desenvolvimento e usa CLI/scripts/IDE pra fazer mudanças,
+  // smoke tests, ou conversar com Gabi sobre features.
+  //
+  // NÃO é o Luís humano direto (que fala via /chat).
+  // NÃO opera a vending (active=false, paused=true, budget=$0).
+  // NÃO entra no tick loop.
+  //
+  // Funções:
+  //   - Aparece como sender nas msgs criadas via scripts smoke-*
+  //   - Conversa com Gabi sobre desenvolvimento do produto
+  //   - Audit de quem fez o quê durante dev
+  {
+    slug: 'claude-code',
+    name: 'Claude Code (Luís dev)',
+    emoji: '🤖',
+    role: 'Entidade técnica — Claude Code rodando no terminal do Luís durante desenvolvimento. NÃO opera a vending. Canal pra colaborar com Gabi em features/bugs.',
+    model: 'n/a', // não roda nunca via runtime
+    budgetUsdMonth: 0,
+    promptCore: `Esse agent não roda no runtime — é só uma identidade pra registrar mensagens vindas do Claude Code (terminal do Luís) no mailbox da empresa.`,
+    toolsAllowed: [], // não vai chamar nada
+    active: false, // não entra no tick
+    humanInLoop: false,
+  },
+
+
   // ============================================================
   // AUGUSTO · Chief of Staff (vai virar CEO quando ganhar confiança)
   // ============================================================

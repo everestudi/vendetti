@@ -17,18 +17,25 @@ async function main() {
   console.log(`   budget: $${augusto.budgetUsdMonth} · spent: $${augusto.spentUsdMonth}`);
   console.log(`   humanInLoop: ${augusto.humanInLoop} · paused: ${augusto.paused}`);
 
-  // Cria msg do Luís
+  // Cria msg do CLAUDE-CODE (não do Luís — isso é smoke test, vem do terminal)
+  const claudeCode = await prisma.agent.findUnique({ where: { slug: 'claude-code' } });
+  if (!claudeCode) {
+    console.error('claude-code não está no DB — rode `npm run seed:agents` primeiro');
+    process.exit(1);
+  }
+
   const msg = await prisma.agentMessage.create({
     data: {
-      fromAgentId: null,
+      fromAgentId: claudeCode.id,
       toAgentId: augusto.id,
-      threadId: 'luis-augusto',
+      threadId: 'claude-code-tests',
       kind: 'QUESTION',
-      body: 'Oi Augusto! Esse é o primeiro teste do novo runtime. Me dá um "olá" curto + 1 frase do que você consegue fazer agora.',
+      body: '[SMOKE TEST do Claude Code, não é o Luís humano] Handshake do runtime: me dá um "olá" curto + 1 frase do que você consegue fazer agora. Sem inventar contexto.',
       status: 'DELIVERED',
     },
   });
-  console.log(`\n📩 Msg criada (id=${msg.id.slice(0, 12)}) na thread luis-augusto`);
+  console.log(`\n📩 Msg criada (id=${msg.id.slice(0, 12)}) thread=claude-code-tests`);
+  console.log(`   sender: 🤖 claude-code (NÃO é o Luís humano)`);
 
   // Roda Augusto inline
   console.log(`\n⏳ Rodando Augusto via runAgent... (Opus 4.7, pode levar 10-30s)`);
@@ -36,9 +43,9 @@ async function main() {
   try {
     const { runId, result } = await runAgent({
       agentSlug: 'augusto',
-      trigger: 'ON_DEMAND',
+      trigger: 'MAILBOX',
       triggerRef: msg.id,
-      payload: { messageId: msg.id, threadId: 'luis-augusto', userText: msg.body },
+      payload: { messageId: msg.id, threadId: 'claude-code-tests', userText: msg.body, source: 'claude-code-smoke' },
     });
     const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
