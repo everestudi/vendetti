@@ -14,8 +14,27 @@ export type SendResult =
   | { ok: true; messageId?: string; raw: unknown }
   | { ok: false; error: string; raw?: unknown };
 
-/** Tira tudo que não for dígito (Z-API exige só números). */
+/**
+ * Normaliza identificador Z-API:
+ * - **Contato pessoal**: tira tudo que não é dígito (Z-API exige só números pra phones)
+ * - **Grupo**: preserva sufixo `-group` (formato legacy) ou `@g.us` (novo).
+ *   Sem o sufixo, Z-API trata como contato individual e a mensagem não chega.
+ *
+ * BUG ENCONTRADO 2026-05-20: replace(/\D/g, '') estava removendo `-group` dos
+ * group IDs. Mensagens da Rita pro grupo Operações nunca chegavam mesmo Z-API
+ * retornando ok=true (enviava pra um phone que não existia). Fix preserva sufixo.
+ */
 function normalizePhone(phone: string): string {
+  // Detecta sufixo de grupo (Z-API aceita 2 formatos: legacy "-group" e novo "@g.us")
+  if (phone.endsWith('-group')) {
+    const numeric = phone.slice(0, -6).replace(/\D/g, '');
+    return `${numeric}-group`;
+  }
+  if (phone.endsWith('@g.us')) {
+    const numeric = phone.slice(0, -5).replace(/\D/g, '');
+    return `${numeric}@g.us`;
+  }
+  // Contato pessoal — só números
   return phone.replace(/\D/g, '');
 }
 
