@@ -32,6 +32,8 @@ export interface PendingDecision {
   summary: string;
   rationale: string;
   createdAt: string;
+  /** Body completo da outbound message se houver (data.outboundMessage.body). */
+  outboundMessage?: { channel: string; body: string; proposedBy?: string } | null;
 }
 
 const KIND_BADGE: Record<string, { bg: string; label: string }> = {
@@ -169,6 +171,117 @@ function PendingMessageCard({ msg }: { msg: PendingMessage }) {
   );
 }
 
+/**
+ * Decision card rich — especialmente bom pra Decision com data.outboundMessage:
+ * mostra body completo + botões Aprovar/Rejeitar inline (call endpoints REST).
+ * Pra outras Decisions (PRICE_CHANGE, RESTOCK_TASK etc), link pra /decisions.
+ */
+function PendingDecisionCard({ dec }: { dec: PendingDecision }) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [confirming, setConfirming] = useState<'approve' | 'reject' | null>(null);
+  const isOutbound = Boolean(dec.outboundMessage?.body);
+  const levelClass =
+    dec.level === 'RED'
+      ? 'border-rose-300 bg-rose-50/40'
+      : dec.level === 'YELLOW'
+        ? 'border-amber-300 bg-amber-50/40'
+        : 'border-emerald-300 bg-emerald-50/40';
+
+  async function callApprove() {
+    setConfirming(null);
+    const r = await fetch(`/api/decisions/${dec.id}/approve`, { method: 'POST' });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      alert(`Falha: ${j.error ?? r.status}`);
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
+  async function callReject() {
+    setConfirming(null);
+    const reasonText = prompt('Motivo da rejeição (opcional):') ?? '';
+    const r = await fetch(`/api/decisions/${dec.id}/reject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reasonCategory: 'rejected-from-empresa', reasonText }),
+    });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      alert(`Falha: ${j.error ?? r.status}`);
+      return;
+    }
+    startTransition(() => router.refresh());
+  }
+
+  return (
+    <article className={`rounded-lg border-2 p-4 ${levelClass}`}>
+      <header className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex items-baseline gap-2">
+          <span className="rounded bg-navy/10 px-2 py-0.5 text-[10px] font-bold uppercase text-navy/70">
+            DECISION · {dec.kind} · {dec.level}
+          </span>
+          {isOutbound && (
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-bold uppercase text-emerald-800">
+              📤 outbound
+            </span>
+          )}
+        </div>
+        <span className="text-[10px] text-navy/45">há {timeAgo(dec.createdAt)}</span>
+      </header>
+
+      {/* Pra outbound: body completo destacado num "envelope" */}
+      {isOutbound && dec.outboundMessage && (
+        <div className="mb-2 rounded-lg border-2 border-emerald-200 bg-white p-3">
+          <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-800">
+            mensagem que vai ser enviada → {dec.outboundMessage.channel === 'grupo_operacao' ? 'Grupo Operação TCN (Weverton)' : dec.outboundMessage.channel}
+          </div>
+          <pre className="whitespace-pre-wrap font-sans text-sm leading-relaxed text-navy/90">
+            {dec.outboundMessage.body}
+          </pre>
+        </div>
+      )}
+
+      {/* Pra outras Decisions: summary + rationale */}
+      {!isOutbound && (
+        <>
+          <div className="mb-1 text-sm font-semibold text-navy/85">{dec.summary}</div>
+          <div className="text-xs text-navy/70">{dec.rationale.slice(0, 200)}{dec.rationale.length > 200 ? '…' : ''}</div>
+        </>
+      )}
+
+      {/* Motivação curta */}
+      {isOutbound && dec.rationale && (
+        <div className="mb-2 text-xs italic text-navy/55">Motivo: {dec.rationale}</div>
+      )}
+
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          onClick={callApprove}
+          disabled={isPending}
+          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
+        >
+          {isPending ? '...' : isOutbound ? '✅ Aprovar e enviar' : '✅ Aprovar'}
+        </button>
+        <button
+          onClick={callReject}
+          disabled={isPending}
+          className="rounded-lg border-2 border-rose-200 bg-white px-3 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
+        >
+          ❌ Rejeitar
+        </button>
+        <Link
+          href={`/decisions#${dec.id}`}
+          className="ml-auto text-[11px] text-navy/55 underline hover:text-navy/85"
+        >
+          ver em /decisions →
+        </Link>
+      </div>
+    </article>
+  );
+}
+
 interface Props {
   pendingMessages: PendingMessage[];
   pendingDecisions: PendingDecision[];
@@ -187,29 +300,17 @@ export function PendingApprovals({ pendingMessages, pendingDecisions }: Props) {
         <h2 className="text-lg font-bold text-navy">
           📥 Pendente da sua aprovação <span className="text-xs font-normal text-navy/55">({total})</span>
         </h2>
-        {pendingDecisions.length > 0 && (
-          <Link
-            href="/decisions"
-            className="text-xs font-semibold text-navy/70 underline hover:text-navy"
-          >
-            {pendingDecisions.length} Decision(s) em /decisions →
-          </Link>
-        )}
       </header>
 
-      {pendingMessages.length > 0 && (
-        <div className="space-y-3">
-          {pendingMessages.map((m) => (
-            <PendingMessageCard key={m.id} msg={m} />
-          ))}
-        </div>
-      )}
-
-      {pendingMessages.length === 0 && pendingDecisions.length > 0 && (
-        <div className="text-sm text-navy/65">
-          {pendingDecisions.length} Decision(s) PENDING — abre /decisions pra aprovar/rejeitar.
-        </div>
-      )}
+      <div className="space-y-3">
+        {/* Decisions primeiro (geralmente mais urgentes — outbound msg pode ser bloqueante) */}
+        {pendingDecisions.map((d) => (
+          <PendingDecisionCard key={`dec:${d.id}`} dec={d} />
+        ))}
+        {pendingMessages.map((m) => (
+          <PendingMessageCard key={`msg:${m.id}`} msg={m} />
+        ))}
+      </div>
     </section>
   );
 }

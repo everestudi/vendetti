@@ -64,12 +64,12 @@ export default async function EmpresaPage() {
       take: 20,
       include: { fromAgent: { select: { slug: true, name: true, emoji: true } } },
     }),
-    // Decisions PENDING
+    // Decisions PENDING — inclui `data` pra renderizar outbound msg com body completo
     prisma.decision.findMany({
       where: { status: 'PENDING' },
       orderBy: { createdAt: 'desc' },
       take: 10,
-      select: { id: true, kind: true, level: true, summary: true, rationale: true, createdAt: true },
+      select: { id: true, kind: true, level: true, summary: true, rationale: true, createdAt: true, data: true },
     }),
   ]);
 
@@ -196,14 +196,24 @@ export default async function EmpresaPage() {
               createdAt: m.createdAt.toISOString(),
               threadId: m.threadId,
             }))}
-            pendingDecisions={pendingDecisions.map((d) => ({
-              id: d.id,
-              kind: d.kind,
-              level: d.level,
-              summary: d.summary,
-              rationale: d.rationale,
-              createdAt: d.createdAt.toISOString(),
-            }))}
+            pendingDecisions={pendingDecisions.map((d) => {
+              const data = (d.data ?? {}) as Record<string, unknown>;
+              const outbound = data.outboundMessage as
+                | { channel?: string; body?: string; proposedBy?: string }
+                | undefined;
+              return {
+                id: d.id,
+                kind: d.kind,
+                level: d.level,
+                summary: d.summary,
+                rationale: d.rationale,
+                createdAt: d.createdAt.toISOString(),
+                outboundMessage:
+                  outbound?.body && outbound.channel
+                    ? { channel: outbound.channel, body: outbound.body, proposedBy: outbound.proposedBy }
+                    : null,
+              };
+            })}
           />
         </div>
       )}
