@@ -1,0 +1,44 @@
+name: Augusto briefing matinal
+
+# Toca o briefing diário do Augusto via WhatsApp pro Luís.
+# Cron 8h BRT (11h UTC). Hobby plan permite — schedule pode atrasar até 15min.
+#
+# Augusto recebe trigger=CRON com payload.mode='morning_briefing' e:
+#   1. Lê mara_summary + infra_health + transactions_recent + list_recent_decisions
+#   2. zelda_token_audit pra ver gasto da empresa
+#   3. Manda WhatsApp via augusto_notify_luis (urgency=normal, needsReply=false)
+#
+# Trigger também via workflow_dispatch pra testar manualmente.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 11 * * *' # 08h BRT (UTC-3)
+
+jobs:
+  briefing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/agents/briefing
+        env:
+          APP_URL: ${{ secrets.APP_URL }}
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::APP_URL ou CRON_SECRET não configurado"
+            exit 1
+          fi
+          echo "→ POST $APP_URL/api/agents/briefing"
+          response=$(curl -sS -X POST "$APP_URL/api/agents/briefing" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            -w "\nHTTP_STATUS:%{http_code}")
+          status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+          body=$(echo "$response" | sed '/HTTP_STATUS:/d')
+          echo "$body"
+          if [ "$status" != "200" ]; then
+            echo "::error::briefing falhou com HTTP $status"
+            exit 1
+          fi
