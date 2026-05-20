@@ -124,11 +124,28 @@ async function claimNextWakeup(): Promise<{
 // Context building (inbox + recalls)
 // ============================================================
 
+/** TTL pra DELIVERED virar STALE — SPEC #3 Gabi. */
+const INBOX_STALE_AFTER_MS = 48 * 60 * 60 * 1000;
+
 async function loadInbox(agentId: string, limit = 10): Promise<InboxMessage[]> {
+  // SPEC #3: sweep msgs DELIVERED > 48h → STALE (auto-self-healing, inline,
+  // 1 query indexed por run — barato). Mantém hot inbox enxuto.
+  const staleBefore = new Date(Date.now() - INBOX_STALE_AFTER_MS);
+  await prisma.agentMessage.updateMany({
+    where: {
+      OR: [{ toAgentId: agentId }, { toAgentId: null }],
+      status: 'DELIVERED',
+      createdAt: { lt: staleBefore },
+    },
+    data: { status: 'STALE' },
+  });
+
+  // Carrega só DELIVERED recentes
   const msgs = await prisma.agentMessage.findMany({
     where: {
-      OR: [{ toAgentId: agentId }, { toAgentId: null }], // direct + broadcast
+      OR: [{ toAgentId: agentId }, { toAgentId: null }],
       status: 'DELIVERED',
+      createdAt: { gte: staleBefore },
     },
     include: { fromAgent: { select: { slug: true } } },
     orderBy: { createdAt: 'desc' },
@@ -147,26 +164,32 @@ async function loadInbox(agentId: string, limit = 10): Promise<InboxMessage[]> {
 
 async function loadRecalls(agentId: string, hint: string, limit = 5): Promise<RecallItem[]> {
   // Keyword search v1 — extrai 2-3 keywords do hint e procura no summary/body.
-  // PR 3 substitui por semantic search via embedding.
+  // SPEC #3 Gabi: index GIN trigram em pg_trgm faz ILIKE virar O(log n).
+  // Embedding semântico fica deferido pra quando recall > 1000 entries.
   const keywords = hint
     .toLowerCase()
     .split(/\s+/)
     .filter((w) => w.length > 4)
     .slice(0, 3);
 
-  const where = keywords.length
+  // Guard: pg_trgm precisa >=3 chars pra usar GIN index — abaixo cai pra seq scan.
+  const validKeywords = keywords.filter((k) => k.length >= 3).map((k) => k.slice(0, 200));
+
+  const where = validKeywords.length
     ? {
         agentId,
-        OR: keywords.flatMap((k) => [
+        OR: validKeywords.flatMap((k) => [
           { summary: { contains: k, mode: 'insensitive' as const } },
           { body: { contains: k, mode: 'insensitive' as const } },
         ]),
       }
     : { agentId };
 
+  // Ordem: RULE/DECISION antes de INSIGHT/CONVERSATION (qualidade do contexto),
+  // depois por hitCount/lastUsedAt (signals de relevância).
   const items = await prisma.agentMemoryRecall.findMany({
     where,
-    orderBy: [{ hitCount: 'desc' }, { lastUsedAt: 'desc' }],
+    orderBy: [{ kind: 'asc' }, { hitCount: 'desc' }, { lastUsedAt: 'desc' }],
     take: limit,
   });
   return items.map((r) => ({

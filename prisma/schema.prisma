@@ -654,6 +654,9 @@ enum AgentMessageStatus {
   ACTIONED
   /// Mensagem foi rejeitada/ignorada pelo destinatário com motivo em refs.
   DISMISSED
+  /// SPEC #3 (Gabi): msg DELIVERED há >48h sem ser lida — removida do hot inbox.
+  /// Preserva pra auditoria mas não polui contexto de runs novas.
+  STALE
 }
 
 /// Fila de wakeups com coalescing (rouba do Paperclip).
