@@ -350,8 +350,17 @@ export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: 
   const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
   if (!machine) return { ok: false, message: 'máquina BlueMall Rondon não cadastrada' };
 
-  let updated = 0;
+  // Carrega TODOS os slots da máquina de uma vez (1 query) pra evitar
+  // 33× findFirst sequencial. Em Vercel serverless com Neon latency, loop
+  // sequencial estava dando timeout >10s no botão "Executar".
+  const allSlots = await prisma.slot.findMany({
+    where: { machineId: machine.id },
+    select: { id: true, position: true },
+  });
+  const slotByPos = new Map(allSlots.map((s) => [s.position, s.id]));
+
   const skipped: string[] = [];
+  const updates: Array<Promise<unknown>> = [];
 
   for (const itRaw of data.items) {
     const it = itRaw as {
@@ -367,19 +376,23 @@ export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: 
       skipped.push(`slot ${it.slotPosition} (qty inválida)`);
       continue;
     }
-    const slot = await prisma.slot.findFirst({
-      where: { machineId: machine.id, position: it.slotPosition },
-    });
-    if (!slot) {
+    const slotId = slotByPos.get(it.slotPosition);
+    if (!slotId) {
       skipped.push(`slot ${it.slotPosition} (não existe no banco)`);
       continue;
     }
-    await prisma.slot.update({
-      where: { id: slot.id },
-      data: { currentQty: it.qty },
-    });
-    updated++;
+    updates.push(
+      prisma.slot.update({
+        where: { id: slotId },
+        data: { currentQty: it.qty },
+      }),
+    );
   }
+
+  // Executa todos os updates em paralelo (Neon aguenta tranquilo 30+ writes
+  // simultâneos via pooler). Bem mais rápido que sequential.
+  await Promise.all(updates);
+  const updated = updates.length;
 
   const summary = `${updated} slot(s) atualizado(s)${skipped.length > 0 ? `, ${skipped.length} pulado(s)` : ''}.`;
   console.log(`[applyInventorySnapshot] ${decisionId}: ${summary}`);

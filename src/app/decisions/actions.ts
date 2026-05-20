@@ -80,6 +80,39 @@ export async function approveDecision(id: string) {
       console.warn('[approveDecision] fireDomainEvent falhou:', e instanceof Error ? e.message : e);
     }
   }
+
+  // === INVENTÁRIO: aprovar = aplicar direto (sem passo "executar" extra) ===
+  // Pra mode='inventory' não faz sentido o fluxo APPROVED → "Executar". Snapshot
+  // é aplicado direto no banco. Update qty + alias learning rolam aqui.
+  if (
+    dec.kind === 'SYSTEM_INVENTORY_SYNC' &&
+    (data as { source?: string }).source === 'weverton-group' &&
+    (data as { mode?: string }).mode === 'inventory'
+  ) {
+    try {
+      const { applyInventorySnapshot } = await import('@/lib/vendetti/weverton-restock');
+      const r = await applyInventorySnapshot(id);
+      if (r.ok) {
+        await prisma.decision.update({
+          where: { id },
+          data: { status: 'EXECUTED' },
+        });
+      } else {
+        await prisma.decision.update({
+          where: { id },
+          data: { status: 'FAILED', rejectReason: `Snapshot falhou: ${r.message}` },
+        });
+      }
+      revalidatePath('/decisions');
+    } catch (e) {
+      console.error('[approveDecision inventory]', e instanceof Error ? e.message : e);
+      await prisma.decision.update({
+        where: { id },
+        data: { status: 'FAILED', rejectReason: `Erro ao aplicar snapshot: ${e instanceof Error ? e.message : String(e)}` },
+      });
+      revalidatePath('/decisions');
+    }
+  }
 }
 
 export async function rejectDecision(formData: FormData) {
@@ -191,10 +224,28 @@ export async function rejectDecision(formData: FormData) {
 }
 
 export async function executeDecisionAction(id: string) {
-  const runExecutor = await loadExecutor();
-  const r = await runExecutor(id, 'admin');
-  if (!r.ok) {
-    console.error(`[/decisions executeAction] ${r.message}`);
+  try {
+    const runExecutor = await loadExecutor();
+    const r = await runExecutor(id, 'admin');
+    if (!r.ok) {
+      console.error(`[/decisions executeAction] ${r.message}`);
+      // Não joga exception — UI já renderiza erro via status FAILED
+    }
+  } catch (e) {
+    // Algo no executor crashou (ex: playwright erro). Marca FAILED em vez de
+    // deixar tela preta (Server Action throw em prod = 500 → tela em branco).
+    console.error('[/decisions executeAction crashed]', e instanceof Error ? e.message : e);
+    try {
+      await prisma.decision.update({
+        where: { id },
+        data: {
+          status: 'FAILED',
+          rejectReason: `Erro executor: ${e instanceof Error ? e.message : String(e)}`.slice(0, 500),
+        },
+      });
+    } catch (e2) {
+      console.error('[/decisions executeAction db update failed]', e2);
+    }
   }
   revalidatePath('/decisions');
 }
