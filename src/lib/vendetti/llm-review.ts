@@ -64,11 +64,11 @@ Casos que você precisa detectar (em ordem de prioridade):
 
 2. **PRODUTO RENOMEADO/ALIAS**: Weverton "Red Bull Amora" pode ser catálogo "Red Bull Frutas Vermelhas" (nome diferente, produto igual). Ação: \`product_swap\` com targetSkuId.
 
-3. **VARIANTE DE FAMÍLIA EXISTENTE**: Weverton "Monster Ultra Sunrise" — catálogo tem outros Monster Ultra. Pode ser variante nova. Se houver variante MUITO próxima (mesmo formato 473ml, marca Monster), action=\`product_swap\`. Senão action=\`create_new\`.
+3. **VARIANTE DE FAMÍLIA EXISTENTE**: Weverton "Monster Ultra Sunrise" — catálogo tem outros Monster Ultra. Pode ser variante nova. Se houver variante MUITO próxima (mesmo formato 473ml, marca Monster), action=\`product_swap\`. **NUNCA recomende cadastrar produto novo** (regra 5 abaixo).
 
 4. **MID CONFIDENCE QUE É SÓ SINÔNIMO**: Weverton "Coca normal 310ml" + Vendtef "Coca Cola 310ml" = mesmo produto, sem swap. Action: \`abastecer_only\`.
 
-5. **REALMENTE PRODUTO NOVO**: nenhuma variante próxima no catálogo. Action: \`create_new\` com newProductName limpo.
+5. **PRODUTO NÃO EXISTE NO CATÁLOGO**: ⚠️ **NUNCA use \`create_new\`** — Luís cadastra produtos novos manualmente por enquanto. Se nenhuma variante próxima existe, action=\`human_review\` com reasoning="produto novo, precisa cadastro manual do Luís: <nome sugerido>".
 
 6. **AMBÍGUO**: não tem certeza. Action: \`human_review\` com reasoning explicando a dúvida.
 
@@ -77,6 +77,7 @@ REGRAS:
 - Sempre dê confidence 0-100 (sua certeza, não a do F1).
 - Reasoning curto (1-2 frases), DIRETO.
 - Output APENAS JSON array, sem markdown.
+- **PROIBIDO**: \`create_new\` — Luís cadastra. Use \`human_review\` em vez disso.
 
 Formato output (1 entry por item input):
 \`\`\`
@@ -195,6 +196,19 @@ Pra cada item em "Items que precisam revisão", analise e retorne JSON array de 
     } catch {
       return { ok: false, reviews: [], error: `LLM retornou JSON inválido: ${cleaned.slice(0, 200)}` };
     }
+
+    // GUARD RAIL: Luís pediu cadastros manuais. Se LLM retornou create_new
+    // (mesmo contra o prompt), força human_review com nota.
+    reviews = reviews.map((r) => {
+      if (r.recommendedAction === 'create_new') {
+        return {
+          ...r,
+          recommendedAction: 'human_review' as const,
+          reasoning: `[guard] cadastro manual pelo Luís — ${r.reasoning}${r.newProductName ? ` (sugestão: "${r.newProductName}")` : ''}`,
+        };
+      }
+      return r;
+    });
 
     // Log da run pra histórico
     await prisma.workerRun

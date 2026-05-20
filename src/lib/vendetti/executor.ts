@@ -24,11 +24,33 @@ export async function executeDecision(decisionId: string, executor = 'admin'): P
     return { ok: false, newStatus: d.status, message: `Status deve ser APPROVED, está ${d.status}` };
   }
 
-  // Reposição do Weverton (SYSTEM_INVENTORY_SYNC com source=weverton-group)
-  // Dispatcheia GH Action — scraper marca EXECUTED/FAILED quando termina.
-  // Status fica APPROVED até lá; UI mostra "rodando".
+  // Mensagens do Weverton (SYSTEM_INVENTORY_SYNC com source=weverton-group)
+  // Bifurca por `data.mode`:
+  //  - 'inventory': snapshot de contagem → atualiza Slot.currentQty no banco
+  //  - 'restock' (default histórico): abastecimento → dispatch GH Action Vendtef
   const dataRaw = (d.data ?? {}) as Record<string, unknown>;
   if (d.kind === 'SYSTEM_INVENTORY_SYNC' && dataRaw.source === 'weverton-group') {
+    const mode = (dataRaw.mode as string | undefined) ?? 'restock';
+
+    if (mode === 'inventory') {
+      // Snapshot — sem GH Action, atualiza banco direto
+      const { applyInventorySnapshot } = await import('./weverton-restock');
+      const r = await applyInventorySnapshot(decisionId);
+      if (!r.ok) {
+        await prisma.decision.update({
+          where: { id: decisionId },
+          data: { status: 'FAILED', approvedBy: executor },
+        });
+        return { ok: false, newStatus: 'FAILED', message: r.message };
+      }
+      await prisma.decision.update({
+        where: { id: decisionId },
+        data: { status: 'EXECUTED', approvedBy: executor },
+      });
+      return { ok: true, newStatus: 'EXECUTED', message: r.message };
+    }
+
+    // mode='restock' (ou undefined = legado): dispatch GH Action
     const { executeWevertonRestock } = await import('./weverton-restock');
     const r = await executeWevertonRestock(decisionId);
     if (!r.ok) {

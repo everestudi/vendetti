@@ -33,6 +33,7 @@ model Sku {
   reposicoes      ReposicaoItem[]
   purchaseItems   PurchaseItem[]
   everestStock    EverestStock?
+  aliases         SkuAlias[]
 }
 
 enum Supplier {
@@ -731,4 +732,40 @@ enum AgentMemoryKind {
   CONVERSATION
   /// Regra invariante (escala de Core mas guarda aqui se for nicho).
   RULE
+}
+
+/// Alias texto-livre → SKU. Aprendizado determinístico de variações que o
+/// Weverton (e qualquer humano) usa pra se referir a produtos do catálogo.
+///
+/// Exemplo:
+///   alias="Biz xtra Black" → sku=Choc Bis Wafer 45G Black
+///   alias="Power ADE azul" → sku=Powerade Frutas Trop 500ml
+///   alias="m&m"            → sku=MMs Amendoim 40g
+///
+/// Quando Luís corrige um match no /decisions (ou cadastra manual), salva aqui.
+/// Próxima vez o parser checa essa tabela ANTES de chamar LLM → vira match
+/// determinístico (sem custo de token, sem alucinação).
+///
+/// alias é guardado em lowercase + sem acentos pra match robusto (normalizado).
+model SkuAlias {
+  id            String   @id @default(cuid())
+  /// Texto normalizado (lowercase, sem acentos, trim). Usado em queries.
+  alias         String
+  /// Versão original do texto pro humano ver no /settings/aliases.
+  aliasOriginal String
+  skuId         String
+  sku           Sku      @relation(fields: [skuId], references: [id], onDelete: Cascade)
+  /// Quem criou: 'luis' (correção manual), 'llm-haiku' (auto após review aprovada).
+  source        String   @default("luis")
+  /// Quantas vezes esse alias já foi usado num match — sinal de uso.
+  hitCount      Int      @default(0)
+  /// Slot específico (opcional) — se o alias só faz sentido em um slot.
+  /// Ex: "Sem produto" não vira alias global, mas pode marcar slot=6 sem SKU.
+  slotPosition  String?
+  createdAt     DateTime @default(now())
+  lastUsedAt    DateTime?
+
+  @@unique([alias, skuId])
+  @@index([alias])
+  @@index([skuId])
 }

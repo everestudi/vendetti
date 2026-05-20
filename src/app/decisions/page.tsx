@@ -152,6 +152,8 @@ interface WevertonItem {
   skip?: boolean;
   newProductData?: NewProductData;
   llmReview?: LLMReview | null;
+  /** Match determinístico via SkuAlias — Luís já corrigiu antes, sem custo de LLM */
+  aliasMatch?: { skuId: string; skuName: string; aliasId: string } | null;
 }
 
 const LLM_ACTION_BADGE: Record<string, { cls: string; emoji: string; label: string }> = {
@@ -163,14 +165,22 @@ const LLM_ACTION_BADGE: Record<string, { cls: string; emoji: string; label: stri
 };
 
 function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; categories: string[] }) {
-  const data = (d.data ?? {}) as { source?: string; items?: WevertonItem[] };
+  const data = (d.data ?? {}) as { source?: string; items?: WevertonItem[]; mode?: 'inventory' | 'restock' };
   const isWeverton = d.kind === 'SYSTEM_INVENTORY_SYNC' && data.source === 'weverton-group';
   const items = isWeverton && Array.isArray(data.items) ? data.items : [];
+  const mode = data.mode ?? 'restock'; // legado sem campo = restock
 
   return (
     <article className="rounded-lg border border-amber-200 bg-amber-50/30 p-4">
       <DecisionHeader d={d} />
-      <h3 className="mt-2 font-semibold text-navy">{d.summary}</h3>
+      <div className="mt-2 flex items-baseline gap-2">
+        <h3 className="font-semibold text-navy">{d.summary}</h3>
+        {isWeverton && (
+          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${mode === 'inventory' ? 'bg-cyan-100 text-cyan-800' : 'bg-orange-100 text-orange-800'}`}>
+            {mode === 'inventory' ? '📋 contagem' : '📦 abastecimento'}
+          </span>
+        )}
+      </div>
       <p className="mt-1 whitespace-pre-wrap text-xs text-navy/70">{d.rationale}</p>
 
       {/* Editor de items (só pra Decisions Weverton) */}
@@ -205,9 +215,17 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
               const llm = it.llmReview;
               const llmBadge = llm ? LLM_ACTION_BADGE[llm.recommendedAction] : null;
               return (
-                <div key={i} className={`rounded border ${it.skip ? 'border-navy/10 bg-navy/5 opacity-50' : willSwap ? 'border-amber-300 bg-amber-50/40' : 'border-navy/15 bg-white'} p-2`}>
-                  {/* 🤖 LLM review banner (quando houve análise da Haiku) */}
-                  {llm && llmBadge && (
+                <div key={i} className={`rounded border ${it.skip ? 'border-navy/10 bg-navy/5 opacity-50' : willSwap ? 'border-amber-300 bg-amber-50/40' : it.aliasMatch ? 'border-emerald-300 bg-emerald-50/30' : 'border-navy/15 bg-white'} p-2`}>
+                  {/* 🎯 ALIAS MATCH (determinístico, sem LLM) — você ensinou antes */}
+                  {it.aliasMatch && (
+                    <div className="mb-2 rounded bg-emerald-100 px-2 py-1 text-[11px] text-emerald-900">
+                      <strong>🎯 alias salvo</strong> · "{it.productGuess}" → <strong>{it.aliasMatch.skuName}</strong>
+                      <span className="ml-1 text-[10px] opacity-70">(match deterministic, sem LLM)</span>
+                    </div>
+                  )}
+
+                  {/* 🤖 LLM review banner (quando houve análise da Haiku, sem alias) */}
+                  {!it.aliasMatch && llm && llmBadge && (
                     <div className={`mb-2 rounded px-2 py-1 text-[11px] ${llmBadge.cls}`}>
                       <div className="flex items-baseline justify-between gap-2">
                         <strong>
@@ -279,7 +297,8 @@ function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; ca
                       ) : (
                         <div className="space-y-2">
                           <div className="text-amber-800">
-                            🆕 <strong>"{defaultTarget}"</strong> não tá no catálogo. Vai ser cadastrado no Vendtef.
+                            🆕 <strong>"{defaultTarget}"</strong> não tá no catálogo.
+                            {' '}<em className="text-rose-700">Cadastro manual — preencha os campos abaixo só se você (Luís) quer cadastrar agora.</em>
                             {skuMatch?.match && (
                               <span className="ml-1 text-navy/55">
                                 (mais próximo: "{skuMatch.match.name}" {skuMatch.score}% — se for esse, ajuste o nome acima)

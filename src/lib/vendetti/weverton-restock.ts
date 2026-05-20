@@ -23,6 +23,21 @@ export interface ParsedItem {
   qty: number;
   slotProduct: string | null;
   matchConfidence: 'high' | 'mid' | 'low' | 'no-slot';
+  /// Se bateu via SkuAlias deterministicamente, não precisa de LLM review.
+  aliasMatch?: { skuId: string; skuName: string; aliasId: string } | null;
+}
+
+/**
+ * Normaliza texto pra match em alias: lowercase + sem acentos + trim + colapsa
+ * espaços. Mesma normalização usada no /api/sku-aliases POST.
+ */
+export function normalizeAlias(text: string): string {
+  return text
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '') // remove diacríticos (acentos)
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export async function parseWevertonText(text: string): Promise<{ items: ParsedItem[]; warnings: string[] }> {
@@ -35,11 +50,14 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
     if (!line) continue;
     const headerMatch = /^\(?(\d{1,3})\)?\s*[-:]?\s*(.+)$/.exec(line);
     if (!headerMatch) continue;
-    const slotPosition = headerMatch[1];
+    // Normaliza removendo zero à esquerda — banco usa "1", "2"... pra 1 dígito.
+    // Sem isso, F1 matcher quebra pra slots 1-6 (busca "01", banco tem "1").
+    const slotPosition = String(parseInt(headerMatch[1], 10));
     let productGuess = headerMatch[2].trim();
     if (productGuess.length < 3) continue;
-    // skip se é "Boa tarde DD/MM" ou "Reposição"
-    if (/^(boa\s+(tarde|noite|dia)|reposi|bom\s+dia)/i.test(productGuess)) continue;
+    // skip se é "Boa tarde DD/MM", "Reposição", "Inventário", ou "N unidade(s)"
+    // (esse último evita interpretar "1 unidade" sozinho como header de slot)
+    if (/^(boa\s+(tarde|noite|dia)|reposi|bom\s+dia|invent|unidad|unid)/i.test(productGuess)) continue;
 
     // Lookahead: linhas adicionais ANTES de "N unidades" são parte do nome
     // do produto (ex: Weverton manda "(56) Monster Energy\nUltra Watermelon\n5 unidades").
@@ -66,15 +84,46 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
 
     let slotProduct: string | null = null;
     let matchConfidence: ParsedItem['matchConfidence'] = 'no-slot';
+    let aliasMatch: ParsedItem['aliasMatch'] = null;
+
     if (machine) {
       const slot = await prisma.slot.findFirst({
         where: { machineId: machine.id, position: slotPosition },
         include: { sku: true },
       });
       slotProduct = slot?.sku?.name ?? null;
-      if (slotProduct) {
-        const guess = productGuess.toLowerCase();
-        const real = slotProduct.toLowerCase();
+
+      // === ALIAS DETERMINÍSTICO (aprendizado real) ===
+      // Antes de F1/LLM, checa se Luís já corrigiu esse texto pra um SKU.
+      // Match direto = nada de alucinação, custo zero. Hit incrementa contador.
+      const aliasKey = normalizeAlias(productGuess);
+      if (aliasKey.length >= 2) {
+        const alias = await prisma.skuAlias.findFirst({
+          where: {
+            alias: aliasKey,
+            // Slot-específico ou global
+            OR: [{ slotPosition }, { slotPosition: null }],
+          },
+          include: { sku: { select: { id: true, name: true } } },
+          orderBy: { slotPosition: 'desc' }, // prefere slot-específico
+        });
+        if (alias) {
+          aliasMatch = { skuId: alias.sku.id, skuName: alias.sku.name, aliasId: alias.id };
+          matchConfidence = 'high'; // alias = match seguro
+          // Atualiza hitCount + lastUsedAt async (não bloqueia)
+          prisma.skuAlias
+            .update({
+              where: { id: alias.id },
+              data: { hitCount: { increment: 1 }, lastUsedAt: new Date() },
+            })
+            .catch((e) => console.warn('[alias hit]', e instanceof Error ? e.message : e));
+        }
+      }
+
+      // Se não bateu alias, faz match heurístico F1 tradicional contra slotProduct
+      if (!aliasMatch && slotProduct) {
+        const guess = normalizeAlias(productGuess);
+        const real = normalizeAlias(slotProduct);
         const tokens = guess.split(/\s+/).filter((t) => t.length > 3);
         const matched = tokens.filter((t) => real.includes(t));
         if (matched.length === tokens.length && tokens.length > 0) matchConfidence = 'high';
@@ -82,7 +131,7 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
         else matchConfidence = 'low';
       }
     }
-    items.push({ slotPosition, productGuess, qty, slotProduct, matchConfidence });
+    items.push({ slotPosition, productGuess, qty, slotProduct, matchConfidence, aliasMatch });
   }
 
   const lowConfidence = items.filter((i) => i.matchConfidence === 'low' || i.matchConfidence === 'no-slot');
@@ -96,18 +145,55 @@ export async function parseWevertonText(text: string): Promise<{ items: ParsedIt
 const brl = (n: number) => n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
 /**
- * Processa uma mensagem do Weverton no grupo Operação.
- * Cria Decision PENDING + notifica Luís.
+ * Detecta o tipo de mensagem do Weverton.
+ *
+ * - `inventory`: snapshot do estado atual ("Inventário 20/05/2026 (01) m&m / 1 unidade").
+ *   `N unidades` = quantidade AGORA no slot → setar Slot.currentQty = N.
+ * - `restock`: reposição feita ("Reposição 19/05/2026 (32) Power ADE azul / 3 unidades").
+ *   `N unidades` = ABASTECEU +N → incrementar + disparar GH Action no Vendtef.
+ * - `unknown`: nem um nem outro (ignora).
  */
-export async function handleWevertonGroupMessage(text: string, messageId?: string): Promise<{ ok: boolean; decisionId?: string; itemsCount?: number; reason?: string }> {
-  // Detecção rápida: só processa se tem padrão de reposição
-  if (!/repos|reabast|completei|abasteci|coloque/i.test(text) && !/^\s*\(?\d/m.test(text)) {
-    return { ok: false, reason: 'sem padrão de reposição' };
+export function detectMessageType(text: string): 'inventory' | 'restock' | 'unknown' {
+  const first200 = text.slice(0, 200).toLowerCase();
+  if (/invent[áa]rio|contagem|tem na m[áa]quina/i.test(first200)) return 'inventory';
+  if (/repos|reabast|completei|abasteci|coloque|reabasteci/i.test(first200)) return 'restock';
+  // Sem header explícito: olhar se tem padrão de slots
+  if (/^\s*\(?\d/m.test(text)) return 'restock'; // fallback histórico — Weverton manda assim
+  return 'unknown';
+}
+
+/**
+ * Processa uma mensagem do Weverton no grupo Operação.
+ * Bifurca entre INVENTÁRIO (snapshot) e REPOSIÇÃO (delta) — semânticas distintas
+ * que antes eram tratadas iguais (bug grave: contagem virava abastecimento).
+ *
+ * Cria Decision PENDING + notifica Luís. Idempotente por messageId.
+ */
+export async function handleWevertonGroupMessage(text: string, messageId?: string): Promise<{ ok: boolean; decisionId?: string; itemsCount?: number; reason?: string; mode?: 'inventory' | 'restock' }> {
+  const mode = detectMessageType(text);
+  if (mode === 'unknown') {
+    return { ok: false, reason: 'sem padrão de inventário/reposição' };
+  }
+
+  // === IDEMPOTÊNCIA: messageId Z-API ===
+  // Z-API retransmite em retry e webhook é chamado 2x. Sem isso, duplicava Decision
+  // (bug visto em 20/05: l46ucy + 3n8qg3 criadas no mesmo segundo).
+  if (messageId) {
+    const existing = await prisma.decision.findFirst({
+      where: {
+        kind: 'SYSTEM_INVENTORY_SYNC',
+        data: { path: ['messageId'], equals: messageId },
+      },
+      select: { id: true },
+    });
+    if (existing) {
+      return { ok: true, decisionId: existing.id, reason: 'idempotent — messageId já processado', mode };
+    }
   }
 
   const { items, warnings } = await parseWevertonText(text);
   if (items.length === 0) {
-    return { ok: false, reason: 'parser não achou items' };
+    return { ok: false, reason: 'parser não achou items', mode };
   }
 
   // 🤖 LLM review: pra items non-high, Claude Haiku analisa considerando o
@@ -124,10 +210,21 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
     llmReview: reviewsBySlot.get(it.slotPosition) ?? null,
   }));
 
-  // Cria Decision PENDING — Luís aprova em /decisions
+  // === SUMMARY/RATIONALE muda por modo ===
   const totalUnits = items.reduce((s, i) => s + i.qty, 0);
-  const summary = `Reposição Weverton: ${items.length} slot(s) · ${totalUnits} unidades`;
+  const summary =
+    mode === 'inventory'
+      ? `📋 Inventário Weverton: ${items.length} slot(s) contados · ${totalUnits} unid no total`
+      : `📦 Reposição Weverton: ${items.length} slot(s) · +${totalUnits} unidades`;
+
+  const headerLine =
+    mode === 'inventory'
+      ? `INVENTÁRIO — snapshot do estado atual da máquina (qty = "tem N agora"). Aprovar atualiza Slot.currentQty no banco.`
+      : `REPOSIÇÃO — abastecimento (qty = "abasteci +N"). Aprovar dispara GH Action que atualiza Vendtef.`;
+
   const rationale = [
+    headerLine,
+    ``,
     `Mensagem recebida no grupo Operação:`,
     `"${text.slice(0, 400)}${text.length > 400 ? '...' : ''}"`,
     ``,
@@ -152,12 +249,14 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
 
   const dec = await prisma.decision.create({
     data: {
+      // SYSTEM_INVENTORY_SYNC pra ambos (mesmo enum, executor diferencia por data.mode)
       kind: 'SYSTEM_INVENTORY_SYNC',
       level: warnings.length > 0 ? 'RED' : 'YELLOW',
       summary,
       rationale,
       data: {
         source: 'weverton-group',
+        mode, // 'inventory' | 'restock' — executor bifurca aqui
         messageId: messageId ?? null,
         rawMessage: text.slice(0, 2000),
         items: itemsWithLLM,
@@ -183,26 +282,176 @@ export async function handleWevertonGroupMessage(text: string, messageId?: strin
   const luisPhone = await getSecret('LUIS_PHONE');
   if (luisPhone) {
     const base = process.env.APP_URL ?? 'https://vendetti.everest.udi.br';
+    const header =
+      mode === 'inventory'
+        ? `📋 Inventário Weverton — aprovação`
+        : `📦 Reposição Weverton — aprovação`;
+    const footer =
+      mode === 'inventory'
+        ? `Após aprovar, o estoque no banco é atualizado pra refletir o estado físico.`
+        : `Após aprovar, o Vendtef é atualizado automaticamente e o grupo é notificado.`;
     const lines = [
-      `📦 Reposição Weverton — aprovação`,
+      header,
       ``,
-      `${items.length} slot(s), ${totalUnits} unidades:`,
-      ...items.map(
+      `${items.length} slot(s)${mode === 'inventory' ? ' contados' : ', ' + totalUnits + ' unidades a abastecer'}:`,
+      ...items.slice(0, 20).map(
         (it) =>
           `· slot ${it.slotPosition.padStart(2, '0')} · ${it.qty}× ${it.productGuess.slice(0, 30)}${it.matchConfidence === 'high' ? ' ✓' : ' ⚠️'}`,
       ),
+      ...(items.length > 20 ? [`… (+${items.length - 20} slots)`] : []),
       ...(warnings.length > 0 ? ['', ...warnings.map((w) => `⚠️ ${w}`)] : []),
       ``,
       `Aprovar / Rejeitar:`,
       `${base}/decisions`,
       ``,
-      `Após aprovar, o Vendtef é atualizado automaticamente e o grupo é notificado.`,
+      footer,
     ].join('\n');
     await sendText(luisPhone, lines).catch((e) => console.warn('[weverton] notify Luís:', e));
   }
   void brl; // reservado pra futuro
 
-  return { ok: true, decisionId: dec.id, itemsCount: items.length };
+  return { ok: true, decisionId: dec.id, itemsCount: items.length, mode };
+}
+
+/**
+ * Aplica snapshot de inventário aprovado.
+ *
+ * Diferente de reposição (que dispara GH Action), inventário apenas atualiza o
+ * estado local: `Slot.currentQty = N` direto. Sem ida no Vendtef.
+ *
+ * Premissa: Luís revisou os matches do LLM e aprovou. Itens com `skip=true` ou
+ * sem match confiável (slotProduct=null e sem targetSkuId) são ignorados.
+ */
+export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: boolean; message: string; updated?: number }> {
+  const dec = await prisma.decision.findUnique({ where: { id: decisionId } });
+  if (!dec) return { ok: false, message: 'Decision não encontrada' };
+  const data = (dec.data ?? {}) as { items?: Array<Record<string, unknown>>; mode?: string };
+  if (data.mode !== 'inventory') {
+    return { ok: false, message: `data.mode esperado 'inventory', recebido '${data.mode}'` };
+  }
+  if (!data.items?.length) return { ok: false, message: 'sem items na Decision' };
+  const machine = await prisma.machine.findFirst({ where: { name: 'Maquina BlueMall Rondon' } });
+  if (!machine) return { ok: false, message: 'máquina BlueMall Rondon não cadastrada' };
+
+  let updated = 0;
+  const skipped: string[] = [];
+
+  for (const itRaw of data.items) {
+    const it = itRaw as {
+      slotPosition: string;
+      qty: number;
+      skip?: boolean;
+    };
+    if (it.skip) {
+      skipped.push(`slot ${it.slotPosition} (skip=true)`);
+      continue;
+    }
+    if (typeof it.qty !== 'number' || it.qty < 0) {
+      skipped.push(`slot ${it.slotPosition} (qty inválida)`);
+      continue;
+    }
+    const slot = await prisma.slot.findFirst({
+      where: { machineId: machine.id, position: it.slotPosition },
+    });
+    if (!slot) {
+      skipped.push(`slot ${it.slotPosition} (não existe no banco)`);
+      continue;
+    }
+    await prisma.slot.update({
+      where: { id: slot.id },
+      data: { currentQty: it.qty },
+    });
+    updated++;
+  }
+
+  const summary = `${updated} slot(s) atualizado(s)${skipped.length > 0 ? `, ${skipped.length} pulado(s)` : ''}.`;
+  console.log(`[applyInventorySnapshot] ${decisionId}: ${summary}`);
+  if (skipped.length > 0) console.log(`[applyInventorySnapshot] skipped: ${skipped.join(', ')}`);
+  // Após aplicar: aprendizado automático dos matches que rolaram
+  await learnAliasesFromDecision(decisionId).catch((e) =>
+    console.warn('[applyInventorySnapshot] learn falhou:', e instanceof Error ? e.message : e),
+  );
+
+  return { ok: true, message: summary, updated };
+}
+
+/**
+ * Aprendizado: ao aprovar Decision, salva os matches confirmados como SkuAlias.
+ *
+ * Pra cada item:
+ *   - Se `targetProduct` foi setado manualmente pelo Luís (via updateDecisionItems)
+ *     → cria alias source='luis' (alta confiança).
+ *   - Se `llmReview.targetSkuId` existe e Luís APROVOU sem editar
+ *     → cria alias source='llm-haiku' (médio — Luís validou implicitamente).
+ *   - Se item.skip=true ou nada disso → não aprende.
+ *
+ * Idempotente: @@unique([alias, skuId]) — segunda tentativa do mesmo par é noop.
+ *
+ * Exporta separado pra poder ser chamado também ao aprovar restock (não só inv).
+ */
+export async function learnAliasesFromDecision(decisionId: string): Promise<{ ok: boolean; learned: number }> {
+  const dec = await prisma.decision.findUnique({ where: { id: decisionId } });
+  if (!dec) return { ok: false, learned: 0 };
+  const data = (dec.data ?? {}) as { items?: Array<Record<string, unknown>> };
+  if (!data.items?.length) return { ok: false, learned: 0 };
+
+  let learned = 0;
+  for (const itRaw of data.items) {
+    const it = itRaw as {
+      slotPosition?: string;
+      productGuess?: string;
+      skip?: boolean;
+      targetProduct?: string; // Luís setou via updateDecisionItems
+      aliasMatch?: { skuId: string } | null;
+      llmReview?: { targetSkuId?: string; recommendedAction?: string } | null;
+    };
+    if (it.skip) continue;
+    if (!it.productGuess || it.productGuess.length < 2) continue;
+    if (it.aliasMatch) continue; // já bateu por alias, não precisa criar
+
+    // Source 1: Luís editou manualmente
+    let targetSkuId: string | undefined;
+    let source = 'luis';
+    if (it.targetProduct) {
+      // targetProduct vem como "skuId" ou "skuName" — tenta resolver
+      const sku =
+        (await prisma.sku.findUnique({ where: { id: it.targetProduct } }).catch(() => null)) ??
+        (await prisma.sku.findFirst({ where: { name: it.targetProduct } }));
+      if (sku) targetSkuId = sku.id;
+    }
+    // Source 2: LLM sugeriu e Luís aprovou (sem editar)
+    if (
+      !targetSkuId &&
+      it.llmReview?.targetSkuId &&
+      ['abastecer_only', 'product_swap'].includes(it.llmReview.recommendedAction ?? '')
+    ) {
+      targetSkuId = it.llmReview.targetSkuId;
+      source = 'llm-haiku';
+    }
+    if (!targetSkuId) continue;
+
+    const aliasKey = normalizeAlias(it.productGuess);
+    if (aliasKey.length < 2) continue;
+
+    try {
+      await prisma.skuAlias.upsert({
+        where: { alias_skuId: { alias: aliasKey, skuId: targetSkuId } },
+        update: { hitCount: { increment: 1 }, lastUsedAt: new Date() },
+        create: {
+          alias: aliasKey,
+          aliasOriginal: it.productGuess.slice(0, 200),
+          skuId: targetSkuId,
+          source,
+          slotPosition: it.slotPosition,
+        },
+      });
+      learned++;
+    } catch (e) {
+      console.warn('[learn alias]', e instanceof Error ? e.message : e);
+    }
+  }
+
+  return { ok: true, learned };
 }
 
 /**
@@ -269,6 +518,11 @@ export async function executeWevertonRestock(decisionId: string): Promise<{ ok: 
     const msg = `🤖 Iniciando abastecimento Vendtef · ${data.items.length} slot(s), ${totalUnits} unidades (Decision ${decisionId.slice(-6)}). Aviso aqui quando terminar (~3-5min).`;
     await sendText(luisPhone, msg).catch((e) => console.warn('[weverton execute] notify Luís:', e));
   }
+
+  // Aprende aliases dos matches confirmados (idempotente, hit-count cresce em re-uso)
+  await learnAliasesFromDecision(decisionId).catch((e) =>
+    console.warn('[executeWevertonRestock] learn falhou:', e instanceof Error ? e.message : e),
+  );
 
   return {
     ok: true,
