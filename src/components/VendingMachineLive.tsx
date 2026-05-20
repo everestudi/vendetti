@@ -146,9 +146,10 @@ function SlotTile({
         ? 'bg-amber-400'
         : 'bg-emerald-500';
 
-  // Format BR pro preço: R$ 4,50 (compact pra caber no tile)
+  // Formato compacto sem "R$ " — só "14,50" — pra caber em tile pequeno.
+  // R$ vira label de coluna implícito pelo contexto da vending.
   const priceBR = slot.price !== null
-    ? slot.price.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL', minimumFractionDigits: 2 })
+    ? slot.price.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
     : null;
 
   return (
@@ -194,9 +195,12 @@ function SlotTile({
             );
           })}
         </div>
-        <div className="flex w-full justify-center leading-none">
+        <div className="flex w-full items-baseline justify-center gap-0.5 leading-none">
           {priceBR && (
-            <span className="font-mono text-[9px] font-bold text-navy/85">{priceBR}</span>
+            <>
+              <span className="font-mono text-[7px] font-semibold text-navy/45">R$</span>
+              <span className="font-mono text-[10px] font-bold tabular-nums text-navy/90">{priceBR}</span>
+            </>
           )}
         </div>
       </div>
