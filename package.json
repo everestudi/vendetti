@@ -24,6 +24,8 @@
     "zapi:list-groups": "dotenv -e .env.local -- tsx src/scripts/zapi-list-groups.ts",
     "scrape:sales": "dotenv -e .env.local -- tsx src/scrapers/vendtef/sales.ts",
     "agent:tick": "dotenv -e .env.local -- tsx src/lib/vendetti/tick.ts",
+    "seed:agents": "dotenv -e .env.local -- tsx scripts/seed-agents.ts",
+    "agents:tick": "dotenv -e .env.local -- tsx scripts/tick-once.ts",
     "vendtef:entrada": "dotenv -e .env.local -- tsx src/scrapers/vendtef/entrada-estoque.ts",
     "vendtef:entrada-ci": "tsx src/scrapers/vendtef/entrada-estoque.ts",
     "vendtef:abastecimento": "dotenv -e .env.local -- tsx src/scrapers/vendtef/abastecimento.ts",

@@ -1,0 +1,50 @@
+name: Agents tick
+
+# Processa wakeups pendentes dos agentes Vendetti.
+# Chama o endpoint /api/tick do app deployado em Vercel (vendetti.everest.udi.br).
+# A logica fica no app — esse workflow só é o trigger temporal.
+#
+# Gatilhos:
+#   - schedule: a cada 15min (Hobby plan permite mas conta no quota; ajustar pra
+#     5min quando upgrade pra Pro)
+#   - workflow_dispatch: dispara manual via GitHub UI
+#   - repository_dispatch (event_type=agents-tick-now): outros sistemas podem disparar
+#
+# IMPORTANT: schedule no GitHub Actions tem grain de 5min. Free runners têm
+# fila — pode atrasar até 15min em horário de pico. Pra "tempo real" use o
+# trigger HTTP via Vercel (POST /api/tick) chamado pelo próprio /chat.
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [agents-tick-now]
+  schedule:
+    - cron: '*/15 * * * *' # cada 15min
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Call /api/tick
+        env:
+          APP_URL: ${{ secrets.APP_URL }} # ex: https://vendetti.everest.udi.br
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          if [ -z "$APP_URL" ] || [ -z "$CRON_SECRET" ]; then
+            echo "::error::APP_URL ou CRON_SECRET não configurado nos secrets do repo"
+            exit 1
+          fi
+          echo "→ POST $APP_URL/api/tick"
+          response=$(curl -sS -X POST "$APP_URL/api/tick" \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            -d '{"maxRuns": 5}' \
+            -w "\nHTTP_STATUS:%{http_code}")
+          status=$(echo "$response" | grep "HTTP_STATUS:" | cut -d: -f2)
+          body=$(echo "$response" | sed '/HTTP_STATUS:/d')
+          echo "$body"
+          if [ "$status" != "200" ]; then
+            echo "::error::tick falhou com HTTP $status"
+            exit 1
+          fi

@@ -479,3 +479,253 @@ enum Role {
   OPERADOR  // Weverton
   VIEWER
 }
+
+// ============================================================
+// === Runtime de agentes — "empresa virtual" Vendetti     ===
+// ============================================================
+// Schema desenhado em mai/2026 pra transformar os "6 agentes" (que eram
+// teatro de UI) em agentes reais rodando em paralelo, com mailbox + memória
+// + schedules. Doc completo em docs/research/MULTI_AGENT_ARCHITECTURE.md.
+//
+// Patterns roubados de:
+//   - Paperclip (paperclipai/paperclip): wakeup coalescing, mailbox unificado,
+//     adapter contract com cost tracking, atomic checkout
+//   - Letta/MemGPT: memória 3-tier (Core / Recall / Archival)
+//   - LangGraph: handoffs explícitos + checkpointing visível
+//   - Mastra: agents-as-tools quando supervisor precisa delegar
+
+/// Definição de um agente da empresa Vendetti.
+/// `promptCore` = memória Core (sempre in-context). Resto é Recall via
+/// AgentMemoryRecall (semantic search) + Archival via cold storage.
+model Agent {
+  id              String   @id @default(cuid())
+  /// Identificador estável usado em handoffs e cross-refs. Ex: 'augusto', 'mara'.
+  slug            String   @unique
+  name            String
+  emoji           String
+  /// Descrição curta — aparece na UI /empresa.
+  role            String
+  /// Prompt Core (identidade + regras invioláveis + alavancas). NÃO inclui
+  /// dados operacionais — esses vêm do contexto montado a cada run.
+  promptCore      String   @db.Text
+  /// Versionamento de prompt — incrementa quando o Luís ou Gabi (co-founder)
+  /// edita. Audit em AgentPromptRevision (futuro).
+  promptRev       Int      @default(1)
+  /// Modelo Anthropic a usar. Ex: 'claude-opus-4-7', 'claude-sonnet-4-5-20250929'.
+  model           String
+  /// Subset de tool slugs que esse agente pode invocar. Empty = sem tools (só LLM).
+  toolsAllowed    String[]
+  /// Budget mensal em USD. Hard-stop quando ultrapassado (rouba do Paperclip).
+  budgetUsdMonth  Decimal  @default(50) @db.Decimal(8, 2)
+  /// Quanto já gastou no mês corrente (resetado por cron mensal).
+  spentUsdMonth   Decimal  @default(0)  @db.Decimal(10, 4)
+  /// Hierarquia — ex: mara/bruno/rita/zelda/lucia reportam pro augusto.
+  reportsToSlug   String?
+  /// Quando true (default no começo), TODA decisão/ação concreta desse agente
+  /// cria Decision em status AWAITING_HUMAN e espera Luís aprovar. Desligar
+  /// quando confiança crescer. Mensagens NOTE/INSIGHT/QUESTION ainda fluem livres.
+  humanInLoop     Boolean  @default(true)
+  /// Ativo no sistema. false = desabilitado permanente (não roda nem aceita msg).
+  active          Boolean  @default(true)
+  /// Pausa temporária — botão de pânico. paused=true → tick pula esse agente
+  /// e wakeups novos ficam QUEUED sem processar. Diferente de active=false
+  /// porque mantém histórico/mailbox acessível.
+  paused          Boolean  @default(false)
+  /// Motivo da pausa (preenchido pelo botão de pânico).
+  pausedReason    String?
+  pausedAt        DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  runs            AgentRun[]
+  wakeups         AgentWakeupRequest[]
+  messagesFrom    AgentMessage[]       @relation("fromAgent")
+  messagesTo      AgentMessage[]       @relation("toAgent")
+  recalls         AgentMemoryRecall[]
+
+  @@index([slug])
+  @@index([active])
+}
+
+/// Cada execução de um agente — um turn do agentic loop.
+/// Mostra "como ele pensou": thinkingMd visível na UI /empresa pro Luís.
+model AgentRun {
+  id            String   @id @default(cuid())
+  agentId       String
+  agent         Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  /// O que disparou esse run.
+  trigger       AgentTrigger
+  /// Ref opcional pro que disparou (msgId / wakeupId / userId).
+  triggerRef    String?
+  status        AgentRunStatus @default(RUNNING)
+  /// Chain-of-thought renderizado em markdown — visível na UI.
+  /// Quando o modelo é Opus 4.7 com extended thinking, salva o thinking block.
+  thinkingMd    String?  @db.Text
+  /// Output final do agente (markdown).
+  outputMd      String?  @db.Text
+  /// Log estruturado de tool calls: [{ name, input, output, ms }, ...].
+  toolCalls     Json?
+  /// Handoff sugerido pelo agente — outro slug que deve ser invocado a seguir.
+  nextAgentSlug String?
+  /// Custo dessa run em USD (input+output tokens × preço modelo).
+  costUsd       Decimal  @default(0) @db.Decimal(10, 6)
+  tokensIn      Int      @default(0)
+  tokensOut    Int      @default(0)
+  startedAt     DateTime @default(now())
+  finishedAt    DateTime?
+  errorMsg      String?  @db.Text
+
+  generatedMessages AgentMessage[] @relation("runGenerated")
+
+  @@index([agentId, startedAt(sort: Desc)])
+  @@index([status])
+}
+
+enum AgentTrigger {
+  /// GH Actions cron chamou /api/tick e esse agente tinha schedule due.
+  CRON
+  /// Outra agente (ou humano) mandou mensagem pra esse agente.
+  MAILBOX
+  /// Luís acionou direto via /chat ou botão "falar com X".
+  ON_DEMAND
+  /// Evento do sistema disparou (ex: Decision criada → Zelda audita).
+  AUTOMATION
+}
+
+enum AgentRunStatus {
+  RUNNING
+  COMPLETED
+  FAILED
+  /// Budget mensal estourou — agente pausado até reset.
+  BUDGET_STOPPED
+  /// Foi superseded por um run mais recente (coalescing).
+  COALESCED
+}
+
+/// Mailbox unificado — humano + agentes na mesma timeline (rouba do Paperclip).
+/// Toda comunicação passa por aqui. UI /empresa renderiza feed disso.
+model AgentMessage {
+  id              String   @id @default(cuid())
+  /// Quem mandou. null = humano (Luís).
+  fromAgentId     String?
+  fromAgent       Agent?   @relation("fromAgent", fields: [fromAgentId], references: [id], onDelete: SetNull)
+  /// Pra quem. null = broadcast (todos veem). Mailbox público por default.
+  toAgentId       String?
+  toAgent         Agent?   @relation("toAgent", fields: [toAgentId], references: [id], onDelete: SetNull)
+  /// ThreadId pra agrupar conversa (mesmo assunto, várias msgs).
+  threadId        String?
+  /// Categoria — pra UI filtrar e priorizar.
+  kind            AgentMessageKind @default(NOTE)
+  /// Body em markdown.
+  body            String   @db.Text
+  /// Refs estruturadas: { decisionId?, slotPosition?, skuCode?, txId?, ... }.
+  refs            Json?
+  status          AgentMessageStatus @default(DELIVERED)
+  /// Se essa msg foi gerada por uma run, qual.
+  triggeredByRunId String?
+  triggeredByRun   AgentRun? @relation("runGenerated", fields: [triggeredByRunId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  readAt          DateTime?
+
+  @@index([toAgentId, status, createdAt])
+  @@index([threadId])
+  @@index([createdAt(sort: Desc)])
+}
+
+enum AgentMessageKind {
+  /// Nota geral, FYI.
+  NOTE
+  /// Pergunta direta, espera resposta.
+  QUESTION
+  /// Insight/finding (análise da Mara, descoberta do Bruno).
+  INSIGHT
+  /// Ação proposta pra outro agente executar.
+  REQUEST
+  /// Alerta — algo crítico, prioridade alta.
+  ALERT
+  /// Proposta da Gabi pro próprio produto Vendetti.
+  PROPOSAL
+}
+
+enum AgentMessageStatus {
+  DELIVERED
+  READ
+  /// Outro agente já agiu sobre essa msg (criou Decision, mandou Z-API, etc).
+  ACTIONED
+  /// Mensagem foi rejeitada/ignorada pelo destinatário com motivo em refs.
+  DISMISSED
+}
+
+/// Fila de wakeups com coalescing (rouba do Paperclip).
+/// Múltiplos wakes pro mesmo agente em janela curta viram um único run.
+/// idempotencyKey previne duplicação cross-process.
+model AgentWakeupRequest {
+  id              String   @id @default(cuid())
+  agentId         String
+  agent           Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  trigger         AgentTrigger
+  /// Ref opcional do que disparou (mailboxMsgId / cronJobName / userId).
+  triggerRef      String?
+  status          AgentWakeupStatus @default(QUEUED)
+  /// Chave de idempotência — formato: '<agentSlug>:<trigger>:<refOrHash>'.
+  /// Wakes duplicados com mesma key incrementam coalescedCount em vez de duplicar.
+  idempotencyKey  String?  @unique
+  coalescedCount  Int      @default(0)
+  /// Payload custom — ex: { messageId, hint }.
+  payload         Json?
+  createdAt       DateTime @default(now())
+  claimedAt       DateTime?
+  completedAt     DateTime?
+  /// RunId que processou esse wakeup, se algum.
+  processedByRunId String?
+
+  @@index([status, createdAt])
+  @@index([agentId, status])
+}
+
+enum AgentWakeupStatus {
+  QUEUED
+  /// Algum tick worker pegou pra processar (lock atômico).
+  CLAIMED
+  COMPLETED
+  FAILED
+  /// Outro wake com mesma idempotencyKey já completou — esse foi mesclado.
+  COALESCED
+}
+
+/// Memória Recall — searchable history que o agente carrega seletivo.
+/// Ex: "última vez que vimos água zero crítica", "decisão de preço Red Bull
+/// em out/25", "Weverton avisou Y em mar/26". Por enquanto keyword search no
+/// body; PR 3 adiciona embedding pra semantic search.
+model AgentMemoryRecall {
+  id          String   @id @default(cuid())
+  agentId     String
+  agent       Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  kind        AgentMemoryKind
+  /// Sumário curto (~200 chars) — usado em keyword search inicial.
+  summary     String
+  /// Corpo completo do que vale lembrar.
+  body        String   @db.Text
+  /// Refs estruturadas (decisionId, msgId, etc).
+  refs        Json?
+  /// Quantas vezes esse recall já foi promovido pro context — feedback signal.
+  hitCount    Int      @default(0)
+  createdAt   DateTime @default(now())
+  lastUsedAt  DateTime?
+
+  @@index([agentId, kind])
+  @@index([agentId, lastUsedAt(sort: Desc)])
+}
+
+enum AgentMemoryKind {
+  /// Decisão tomada e por quê.
+  DECISION
+  /// Padrão observado nos dados.
+  INSIGHT
+  /// Erro cometido + correção (pra não repetir).
+  MISTAKE
+  /// Trecho de conversa relevante com o Luís.
+  CONVERSATION
+  /// Regra invariante (escala de Core mas guarda aqui se for nicho).
+  RULE
+}
