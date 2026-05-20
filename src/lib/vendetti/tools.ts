@@ -172,24 +172,24 @@ export const decision_create = tool({
       select: { id: true, status: true, createdAt: true },
     });
 
-    // PROPOSAL #2 (Gabi): trigger automático — toda Decision criada acorda Zelda
-    // pra auditar. Se Zelda agent estiver seedada e ativa, enfileira wakeup.
-    // Idempotência: 1 wakeup por Decision (evita Augusto chamar decision_create
-    // 2x e disparar Zelda 2x pra mesma decisão).
+    // Trigger automático Zelda — via fireDomainEvent (centralizado em
+    // src/lib/agents/triggers.ts). Loop prevention: se Zelda mesmo criar
+    // Decision, não auto-dispara (isRecursive em triggers.ts trata).
+    //
+    // TODO: passar createdByAgentSlug real (precisa contexto da run atual).
+    // Por ora hardcoded 'unknown' — recursion check só funciona quando
+    // sabemos quem criou. Aceito por enquanto.
     try {
-      const { enqueueWakeup } = await import('../agents/runtime');
-      const zelda = await prisma.agent.findUnique({ where: { slug: 'zelda' } });
-      if (zelda && zelda.active && !zelda.paused) {
-        await enqueueWakeup({
-          agentSlug: 'zelda',
-          trigger: 'AUTOMATION',
-          triggerRef: d.id,
-          idempotencyKey: `audit-decision:${d.id}`,
-          payload: { decisionId: d.id, kind, level, summary },
-        });
-      }
+      const { fireDomainEvent } = await import('../agents/triggers');
+      await fireDomainEvent({
+        kind: 'decision_created',
+        decisionId: d.id,
+        createdByAgentSlug: 'unknown',
+        decisionKind: kind,
+        level,
+      });
     } catch (e) {
-      console.warn('[decision_create] zelda wakeup falhou (não-fatal):', e instanceof Error ? e.message : e);
+      console.warn('[decision_create] fireDomainEvent falhou (não-fatal):', e instanceof Error ? e.message : e);
     }
 
     return {

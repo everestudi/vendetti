@@ -1,39 +1,64 @@
 /**
- * Pede pra Gabi mandar UMA SPEC focada (#2) sem ficar lendo arquivos de novo.
+ * Pedido SUPER assertivo pra Gabi mandar SPEC #2.
+ * max_tokens agora é 8192 no runtime — não deve truncar.
  */
 
 import { prisma } from '../src/lib/db';
 import { runAgent } from '../src/lib/agents/runtime';
 
-const FOCUSED_REQUEST = `Gabi, pedido FOCADO — você esgotou tokens 2x lendo arquivos demais.
+const ASSERTIVE_REQUEST = `🛑 GABI, LEIA COM ATENÇÃO:
 
-REGRA: NÃO leia mais arquivos. Você JÁ leu runtime.ts, schema.prisma, seed.ts, tool-bridge.ts. Contexto suficiente.
+Você truncou 3 vezes. Custou $5.92 sem entregar UMA SPEC.
 
-Faça UMA coisa só: chame agent_send_message UMA vez com kind=REQUEST pro claude-code com SPEC #2 (triggers automáticos pós-eventos) no body.
+⛔ PROIBIDO nesta run:
+- gabi_read_repo_file (você JÁ leu tudo necessário)
+- gabi_recent_runs (você JÁ viu)
+- Análise prosa antes de mandar tool
+- "Vou ler X primeiro"
 
-Estrutura obrigatória do body:
+✅ PERMITIDO apenas:
+- UMA chamada de agent_send_message({to:"claude-code", kind:"REQUEST", body:SPEC})
 
-# SPEC #2: Triggers automáticos pós-eventos
+PRIMEIRO ato da sua run: CHAMAR agent_send_message. Não escreva texto antes.
+Análise opcional vem DEPOIS da tool call, no texto livre.
 
-## Contexto
-[2 linhas: hoje só Augusto roda; outros agentes ficam idle até Luís perguntar]
+🎯 SPEC #2: triggers automáticos pós-eventos
 
-## Arquivos a tocar
-- arquivo:linha — descrição
+Você já articulou o problema nas runs anteriores:
+- 6 agentes mortos (0 runs)
+- Augusto chama tools direto via tool-bridge em vez de delegar via handoff
+- mara_sync→Mara já implementado (run.ts [5/5])
+- Decision→Zelda implementado AGORA (commit ad8ad38)
 
-## Mudanças
-1. **[Arquivo X]**: snippet de código exato
-2. ...
+Falta:
+1. Triggers que ainda não existem
+2. Modelo por trigger type (Haiku pra summary, Sonnet pra análise)
+3. Como Augusto deve delegar via agent_handoff em vez de chamar tool direto
+
+Formato OBRIGATÓRIO do body:
+
+# SPEC #2: Triggers automáticos completos
+
+## Status atual
+[2 linhas: o que já existe (mara_sync→Mara, Decision→Zelda) e o que falta]
+
+## O que falta implementar
+1. **Trigger X**: [arquivo:linha] [snippet de código]
+2. **Trigger Y**: ...
+
+## Refactor Augusto pra delegar
+[snippet do prompt Augusto: quando Z, chame agent_handoff em vez de mara_summary direto]
 
 ## Ordem de implementação
 1. ...
+2. ...
 
 ## Edge cases
 - ...
 
 ## Esforço: ~Xh
 
-UMA CHAMADA SÓ de agent_send_message. NADA MAIS. NÃO chame gabi_read_repo_file de novo.`;
+Vai. agent_send_message AGORA. NADA antes.`;
 
 async function main() {
   const cc = await prisma.agent.findUnique({ where: { slug: 'claude-code' } });
@@ -46,25 +71,27 @@ async function main() {
       toAgentId: gabi.id,
       threadId: 'claude-code-gabi',
       kind: 'REQUEST',
-      body: FOCUSED_REQUEST,
+      body: ASSERTIVE_REQUEST,
       status: 'DELIVERED',
     },
   });
-  console.log('Msg enviada, rodando Gabi...');
+  console.log('Msg', msg.id.slice(0, 12), 'enviada, rodando Gabi (max_tokens 8192)...');
 
+  const t0 = Date.now();
   const { runId, result } = await runAgent({
     agentSlug: 'gabi',
     trigger: 'MAILBOX',
     triggerRef: msg.id,
-    payload: { messageId: msg.id, threadId: 'claude-code-gabi', focusedRequest: 'spec-2-only' },
+    payload: { messageId: msg.id, threadId: 'claude-code-gabi', focusedRequest: 'spec-2-final' },
   });
+  const elapsed = ((Date.now() - t0) / 1000).toFixed(1);
 
-  console.log('Run', runId.slice(0, 8), 'cost $' + result.costUsd.toFixed(4));
-  console.log('tools:', result.toolCalls.map((t) => t.name).join(', '));
-  console.log('msgs novas:', result.newMessages.length);
+  console.log(`\n✓ Run ${runId.slice(0, 8)} em ${elapsed}s · $${result.costUsd.toFixed(4)}`);
+  console.log(`tokens: ${result.tokensIn} in / ${result.tokensOut} out`);
+  console.log(`tools: ${result.toolCalls.map((t) => t.name).join(', ') || '(nenhuma)'}`);
+  console.log(`msgs novas: ${result.newMessages.length}`);
   for (const m of result.newMessages) {
-    console.log(' →', m.toSlug ?? 'broadcast', m.kind, 'body len:', m.body.length);
-    console.log('   ', m.body.slice(0, 150) + '...');
+    console.log(`  → ${m.toSlug ?? 'broadcast'} · ${m.kind} · ${m.body.length} chars`);
   }
 }
 

@@ -9,7 +9,7 @@ import { loadAll } from './load';
 import { getLatestSnapshot, getMarginBuckets } from './analytics';
 import { runWithWorkerLog } from '../../infra/health';
 import { backfillProductImages } from '../../products/fetch-images';
-import { enqueueWakeup } from '../../agents/runtime';
+import { fireDomainEvent, fireStockCriticalEvents } from '../../agents/triggers';
 import { prisma } from '../../db';
 
 async function main() {
@@ -65,36 +65,24 @@ async function main() {
     console.warn('  ⚠️ backfill imagens falhou (não-fatal):', e instanceof Error ? e.message : e);
   }
 
-  // [5/5] dispara wakeup pro agente Mara analisar o diff — se ela existir no DB.
-  // Princípio: dado fresh → análise fresh. Augusto consome findings via mailbox.
-  // O wakeup vai pra fila e é processado pelo próximo /api/tick (≤15min) OU
-  // disparado manual via gh workflow run agents-tick.yml.
-  console.log('\n[5/5] agente Mara — disparando wakeup pós-sync...');
+  // [5/5] triggers automáticos pós-sync via fireDomainEvent (SPEC #2 Gabi):
+  //   - mara_sync_done → acorda Mara pra analisar diff
+  //   - stock_critical (batch) → acorda Bruno por slot crítico (dedupe diário)
+  console.log('\n[5/5] triggers automáticos pós-sync...');
   try {
-    const mara = await prisma.agent.findUnique({ where: { slug: 'mara' } });
-    if (!mara) {
-      console.log('  (agente mara não está no DB — rode `npm run seed:agents` se quiser)');
-    } else if (mara.paused || !mara.active) {
-      console.log(`  (agente mara está ${mara.paused ? 'pausado' : 'inativo'} — pulando)`);
-    } else {
-      const r = await enqueueWakeup({
-        agentSlug: 'mara',
-        trigger: 'AUTOMATION',
-        triggerRef: `mara_sync@${new Date().toISOString()}`,
-        // Idempotency por hora — várias maras_sync no mesmo dia geram só 1 wakeup
-        // (Mara analisa "estado atual" não o histórico de cada sync individual)
-        idempotencyKey: `mara_sync:${new Date().toISOString().slice(0, 13)}`,
-        payload: {
-          source: 'mara_sync',
-          snapshotCapacityPct: snap?.capacityFilledPct ?? null,
-          slotsCritical: snap?.slotsCritical ?? 0,
-          lowMarginCount: buckets.low.length,
-        },
-      });
-      console.log(`  ✓ wakeup enfileirado (${r.coalesced ? 'coalesced' : 'novo'}, id=${r.wakeupId.slice(0, 8)})`);
-    }
+    const runId = `mara_sync@${new Date().toISOString()}`;
+    const r = await fireDomainEvent({
+      kind: 'mara_sync_done',
+      runId,
+      capacityPct: snap?.capacityFilledPct ? Number(snap.capacityFilledPct) : undefined,
+      criticalCount: snap?.slotsCritical ?? 0,
+    });
+    console.log(`  · mara_sync_done → ${r.fired ? '✓' : '✗'} ${r.reason ?? ''}`);
+
+    const stock = await fireStockCriticalEvents();
+    console.log(`  · stock_critical batch → ${stock.fired} novos, ${stock.skipped} já disparados hoje`);
   } catch (e) {
-    console.warn('  ⚠️ enqueueWakeup falhou (não-fatal):', e instanceof Error ? e.message : e);
+    console.warn('  ⚠️ triggers falharam (não-fatal):', e instanceof Error ? e.message : e);
   }
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);

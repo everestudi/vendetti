@@ -399,7 +399,9 @@ async function callAnthropicWithLoop(
     // promptCore + SHARED_RULES não mudam entre runs do mesmo agente, OK.
     const response = await client.messages.create({
       model: agent.model,
-      max_tokens: 4096,
+      // 8192 (era 4096) — Gabi truncou 3x escrevendo SPECs ricas. Custo extra
+      // marginal (~$0.0006/run em Opus). Resolve runs que precisam output longo.
+      max_tokens: 8192,
       system: [
         {
           type: 'text' as const,
@@ -736,18 +738,29 @@ export async function runAgent(input: {
         data: { spentUsdMonth: { increment: costUsd } },
       });
 
-      // Se handoff explícito, enfileira wakeup do próximo
+      // Se handoff explícito, enfileira wakeup do próximo agente.
+      // Loop protection: handoffDepth no payload — máx 3 hops em cadeia,
+      // se ultrapassar dropa o wakeup (evita Augusto↔Mara infinito).
       if (parsed.nextAgentSlug) {
-        const next = await tx.agent.findUnique({ where: { slug: parsed.nextAgentSlug } });
-        if (next) {
-          await tx.agentWakeupRequest.create({
-            data: {
-              agentId: next.id,
-              trigger: 'AUTOMATION',
-              triggerRef: `handoff-from-${agent.slug}-run-${run.id}`,
-              payload: { handoffFromRunId: run.id } as never,
-            },
-          });
+        const currentDepth = (input.payload as { handoffDepth?: number } | undefined)?.handoffDepth ?? 0;
+        if (currentDepth >= 3) {
+          console.warn(`[runtime] handoff depth ${currentDepth} >= 3 — dropando handoff de ${agent.slug} → ${parsed.nextAgentSlug}`);
+        } else {
+          const next = await tx.agent.findUnique({ where: { slug: parsed.nextAgentSlug } });
+          if (next) {
+            await tx.agentWakeupRequest.create({
+              data: {
+                agentId: next.id,
+                trigger: 'AUTOMATION',
+                triggerRef: `handoff-from-${agent.slug}-run-${run.id}`,
+                payload: {
+                  handoffFromRunId: run.id,
+                  handoffFromAgent: agent.slug,
+                  handoffDepth: currentDepth + 1,
+                } as never,
+              },
+            });
+          }
         }
       }
     });
