@@ -20,12 +20,53 @@ export async function approveDecision(id: string) {
   });
   revalidatePath('/decisions');
 
+  // === Outbound message proposta pela Rita (modo human-in-the-loop) ===
+  // Se data.outboundMessage existir, Luís aprovou — dispara envio Z-API real.
+  // Sucesso → status EXECUTED. Falha Z-API → marca rejectReason com erro
+  // (Luís pode tentar re-aprovar ou rejeitar).
+  const data = (dec.data ?? {}) as Record<string, unknown>;
+  const outbound = data.outboundMessage as
+    | { channel?: string; body?: string; proposedBy?: string }
+    | undefined;
+  if (outbound?.channel === 'grupo_operacao' && outbound.body) {
+    try {
+      const { sendToOperacaoGroup } = await import('@/lib/zapi/send');
+      const r = await sendToOperacaoGroup(outbound.body);
+      if (r.ok) {
+        await prisma.decision.update({
+          where: { id },
+          data: {
+            status: 'EXECUTED',
+            data: {
+              ...data,
+              outboundMessage: {
+                ...outbound,
+                sentAt: new Date().toISOString(),
+                zapiMessageId: r.messageId,
+              },
+            } as never,
+          },
+        });
+      } else {
+        await prisma.decision.update({
+          where: { id },
+          data: {
+            status: 'FAILED',
+            rejectReason: `Z-API falhou: ${r.error}`,
+          },
+        });
+      }
+      revalidatePath('/decisions');
+    } catch (e) {
+      console.warn('[approveDecision outbound]', e instanceof Error ? e.message : e);
+    }
+  }
+
   // Trigger automático restock_approved (SPEC #2): se Decision foi de reposição,
   // dispara wakeup pra Rita agendar Weverton.
   if (dec.kind === 'RESTOCK_ORDER' || dec.kind === 'RESTOCK_TASK') {
     try {
       const { fireDomainEvent } = await import('@/lib/agents/triggers');
-      const data = (dec.data ?? {}) as Record<string, unknown>;
       const items = Array.isArray(data.items) ? (data.items as Array<{ slotPosition?: string; slot?: string }>) : [];
       const slots = items
         .map((it) => it.slotPosition ?? it.slot ?? '')

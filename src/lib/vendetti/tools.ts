@@ -992,6 +992,52 @@ export const refetch_product_image = tool({
 });
 
 // ============================================================
+// Rita · proposta de mensagem (modo human-in-the-loop)
+// ============================================================
+// Luís pediu: no início, ele aprova TODA mensagem que Rita manda pro
+// grupo Operação TCN (Weverton). Em vez de enviar direto via
+// rita_send_grupo_operacao, Rita cria Decision PENDING — Luís aprova
+// em /decisions ou /chat → approveDecision dispara o envio Z-API real.
+// Quando Rita ganhar confiança, posso destravar (Agent.outboundRequiresApproval).
+
+export const rita_propose_grupo_operacao = tool({
+  description:
+    'PROPÕE mensagem pro grupo Operação TCN (Weverton). REQUER APROVAÇÃO DO LUÍS antes de enviar — cria Decision PENDING. Luís aprova em /decisions ou /chat → envio Z-API real só depois disso. Use SEMPRE essa em vez de rita_send_grupo_operacao no início (Luís quer validar tom/conteúdo antes da Rita ganhar autonomia).',
+  inputSchema: z.object({
+    message: z.string().min(5).max(1500).describe('Texto da mensagem WhatsApp — telegráfico, sem floreio (lembra que vai pro Weverton)'),
+    rationale: z
+      .string()
+      .min(10)
+      .describe('Por que essa mensagem AGORA — contexto pro Luís decidir rápido. Ex: "Augusto pediu inventário antes do abastecimento de hoje."'),
+  }),
+  execute: async ({ message, rationale }) => {
+    const d = await prisma.decision.create({
+      data: {
+        kind: 'OTHER',
+        level: 'YELLOW',
+        summary: `📤 WhatsApp grupo Operação: "${message.slice(0, 80)}${message.length > 80 ? '…' : ''}"`,
+        rationale,
+        data: {
+          outboundMessage: {
+            channel: 'grupo_operacao',
+            body: message,
+            proposedBy: 'rita',
+          },
+        } as never,
+        status: 'PENDING',
+      },
+    });
+    return {
+      from: 'Rita',
+      ok: true,
+      decisionId: d.id,
+      note: `Decision ${d.id.slice(-6)} criada PENDING. Luís aprova em /decisions OU /empresa OU via /chat ("aprovar ${d.id.slice(-6)}"). Z-API só dispara depois disso.`,
+      next: 'Reporta pro Augusto que aguarda aprovação. Augusto pode chamar augusto_notify_luis pra avisar Luís via WhatsApp se for urgente.',
+    };
+  },
+});
+
+// ============================================================
 // Rita · TESTES Vendtef (workflows GH Actions isolados)
 // ============================================================
 // Pedido do Luís: validar TODOS os fluxos Vendtef antes de delegar
@@ -1455,4 +1501,5 @@ export const VENDETTI_TOOLS = {
   rita_vendtef_test_sales,
   rita_vendtef_test_explore,
   rita_vendtef_test_slot_update,
+  rita_propose_grupo_operacao,
 } as const;
