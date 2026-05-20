@@ -8,6 +8,7 @@ import { extractAll } from './extract';
 import { loadAll } from './load';
 import { getLatestSnapshot, getMarginBuckets } from './analytics';
 import { runWithWorkerLog } from '../../infra/health';
+import { backfillProductImages } from '../../products/fetch-images';
 
 async function main() {
   console.log('🧮 Mara — sync iniciado');
@@ -45,6 +46,21 @@ async function main() {
     for (const s of buckets.low) {
       console.log(`  · sel ${s.selecao.padStart(3, ' ')}  ${s.produto.slice(0, 40).padEnd(40, ' ')} ${s.marginPct.toFixed(1)}%  R$ ${s.price.toFixed(2)}`);
     }
+  }
+
+  // [4/4] backfill imagens pros SKUs novos (sem imageUrl). Princípio:
+  // "sempre atualizado" — não obriga Luís/Augusto a disparar manualmente.
+  // Throttle interno garante que rodada não explode quota se vier SKU novo.
+  console.log('\n[4/4] imagens — backfill SKUs sem imagem...');
+  try {
+    const img = await backfillProductImages({ max: 50 });
+    if (img.total === 0) {
+      console.log('  ✓ todos os SKUs ativos já têm imagem');
+    } else {
+      console.log(`  ✓ ${img.matched}/${img.total} novas imagens (${img.failed} falharam)`);
+    }
+  } catch (e) {
+    console.warn('  ⚠️ backfill imagens falhou (não-fatal):', e instanceof Error ? e.message : e);
   }
 
   const elapsed = ((Date.now() - t0) / 1000).toFixed(1);

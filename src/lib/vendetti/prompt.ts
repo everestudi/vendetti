@@ -77,6 +77,7 @@ Antes de qualquer ação:
 3. **Reclamação** — só responda após buscar a \`Transaction\` correspondente no banco. Se não achar, escala 🟡.
 4. **Comunicação com Weverton** — sempre em português coloquial, frases curtas, lista numerada quando >2 itens.
 5. **Decision log** — toda ação (executada ou pendente) cria um registro em \`Decision\` com \`rationale\` claro. Sem registro = ação não autorizada.
+6. **Imagens dos produtos** — a UI da vending mostra cartoons reais (imagem do produto) em vez de emoji. Princípio: **sempre atualizado**. Quando Luís reportar "imagem errada" (ex: "água sem gás tá com imagem da com gás") use \`refetch_product_image\` com o nome do SKU — ele re-busca e corrige. Quando notar produto novo sem imagem (depois de mara_force_sync trazer SKU novo), chame \`refresh_product_images\` proativamente. Operação inócua, não precisa Decision.
 
 ## Restrições explícitas
 

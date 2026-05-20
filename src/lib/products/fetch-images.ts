@@ -199,6 +199,68 @@ export async function fetchImageForSku(
   return null;
 }
 
+/** Re-busca imagem pra UM SKU específico (match por nome fuzzy).
+ *  Retorna o SKU encontrado + resultado da busca. Usado por Augusto via tool
+ *  quando ele detecta match errado ou Luís reporta produto sem imagem. */
+export async function refetchImageForSkuByName(skuName: string): Promise<{
+  ok: boolean;
+  skuFound: { id: string; name: string; previousImageUrl: string | null } | null;
+  matched: { name: string; imageUrl: string; score: number; source: string } | null;
+  error?: string;
+}> {
+  // Match fuzzy: tenta nome exato (case-insensitive) → tokens significativos
+  let sku = await prisma.sku.findFirst({
+    where: { active: true, name: { equals: skuName, mode: 'insensitive' } },
+    select: { id: true, name: true, imageUrl: true },
+  });
+  if (!sku) {
+    // tenta contains
+    sku = await prisma.sku.findFirst({
+      where: { active: true, name: { contains: skuName, mode: 'insensitive' } },
+      select: { id: true, name: true, imageUrl: true },
+    });
+  }
+  if (!sku) {
+    // fallback token search — pega o SKU com maior similarity
+    const all = await prisma.sku.findMany({
+      where: { active: true },
+      select: { id: true, name: true, imageUrl: true },
+    });
+    let best: { id: string; name: string; imageUrl: string | null; score: number } | null = null;
+    for (const s of all) {
+      const score = similarity(skuName, s.name);
+      if (score >= 50 && (!best || score > best.score)) {
+        best = { ...s, score };
+      }
+    }
+    if (best) {
+      sku = { id: best.id, name: best.name, imageUrl: best.imageUrl };
+    }
+  }
+  if (!sku) {
+    return { ok: false, skuFound: null, matched: null, error: `SKU "${skuName}" não encontrado no catálogo` };
+  }
+
+  const result = await fetchImageForSku(sku.name);
+  if (!result) {
+    return {
+      ok: false,
+      skuFound: { id: sku.id, name: sku.name, previousImageUrl: sku.imageUrl },
+      matched: null,
+      error: 'Atacadão + Claude web search falharam — nenhuma imagem com confiança suficiente',
+    };
+  }
+  await prisma.sku.update({
+    where: { id: sku.id },
+    data: { imageUrl: result.imageUrl },
+  });
+  return {
+    ok: true,
+    skuFound: { id: sku.id, name: sku.name, previousImageUrl: sku.imageUrl },
+    matched: result,
+  };
+}
+
 /** Popula imagens em massa pra todos os SKUs sem imageUrl. */
 export async function backfillProductImages(opts: { force?: boolean; max?: number } = {}): Promise<{
   ok: boolean;

@@ -24,6 +24,7 @@ import { searchAtacadao } from '../../scrapers/atacadao/search';
 import { sendToOperacaoGroup, sendText } from '../zapi/send';
 import { getFreshness, getInfraHealth } from '../infra/health';
 import { dispatchWorkflow } from '../infra/gh-dispatch';
+import { backfillProductImages, refetchImageForSkuByName } from '../products/fetch-images';
 
 // ============================================================
 // Read-only — Mara (DB)
@@ -892,6 +893,57 @@ export const rita_send_luis = tool({
   },
 });
 
+// ============================================================
+// Imagens de produto — Atacadão + Claude web search
+// ============================================================
+
+export const refresh_product_images = tool({
+  description:
+    'Roda backfill de imagens APENAS pros SKUs ativos que ainda não têm imageUrl. Usa Atacadão → Claude web search → match parcial Atacadão. Demora ~30s-1min pra ~30 SKUs. Use proativamente quando notar produto sem imagem na vending, ou após Mara importar SKU novo. Read+Write — não cria Decision (operação inócua de UX).',
+  inputSchema: z.object({
+    max: z.number().int().min(1).max(200).default(100).describe('Máximo de SKUs a processar nessa rodada'),
+  }),
+  execute: async ({ max }) => {
+    const r = await backfillProductImages({ max });
+    return {
+      ok: r.ok,
+      total: r.total,
+      matched: r.matched,
+      skipped: r.skipped,
+      failed: r.failed,
+      summary: `${r.matched}/${r.total} SKUs ganharam imagem (${r.failed} falharam, ${r.skipped} skipped)`,
+      failedSkus: r.details.filter((d) => !d.matched && !d.skipped).map((d) => d.skuName),
+    };
+  },
+});
+
+export const refetch_product_image = tool({
+  description:
+    'Re-busca a imagem de UM SKU específico pelo nome — força nova busca mesmo se já tinha imagem. Use quando Luís reportar "imagem errada" (ex: água sem gás pegou imagem da com gás) ou quando você detectar match suspeito. Match fuzzy: aceita nome aproximado (ex: "água crystal sem gás" acha "Água Crystal Sem Gás 500ml"). Read+Write — não cria Decision.',
+  inputSchema: z.object({
+    skuName: z.string().min(2).describe('Nome do produto a re-buscar (fuzzy match, ex: "red bull 250", "água sem gás")'),
+  }),
+  execute: async ({ skuName }) => {
+    const r = await refetchImageForSkuByName(skuName);
+    if (!r.ok) {
+      return {
+        ok: false,
+        error: r.error,
+        skuFound: r.skuFound,
+        hint: r.skuFound
+          ? `SKU encontrado mas Atacadão/Claude não acharam imagem confiável — talvez produto raro. Reporta pro Luís.`
+          : `Não achei SKU "${skuName}" no catálogo — verifique o nome ou rode mara_force_sync se for produto novo.`,
+      };
+    }
+    return {
+      ok: true,
+      sku: r.skuFound,
+      newImage: r.matched,
+      summary: `✓ ${r.skuFound?.name} → ${r.matched?.source} (${r.matched?.score}% match)`,
+    };
+  },
+});
+
 export const VENDETTI_TOOLS = {
   mara_summary,
   mara_margin_buckets,
@@ -915,4 +967,6 @@ export const VENDETTI_TOOLS = {
   infra_health,
   mara_force_sync,
   infra_trigger_backfill,
+  refresh_product_images,
+  refetch_product_image,
 } as const;
