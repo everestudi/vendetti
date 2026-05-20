@@ -1,13 +1,16 @@
 'use client';
 
 /**
- * Lista de itens pendentes da aprovação do Luís:
- *   - AgentMessage kind ∈ {PROPOSAL, REQUEST, QUESTION} status=DELIVERED|READ
- *     com toAgentId=null (broadcast — Luís vê) e fromAgentId não-null
- *   - Decisions status=PENDING (link pra /decisions)
+ * Lista de itens pendentes da aprovação do Luís — SÓ DECISIONS.
  *
- * Cada item tem botões: ✅ Aprovar · ❌ Rejeitar · 💬 Comentar.
- * Aprovar/rejeitar via POST /api/agents/messages/[id]/action.
+ * Versão anterior incluía AgentMessages do Augusto (kind QUESTION/ALERT/etc),
+ * mas isso poluía com perguntas conversacionais ("Qual texto?", "Me dá pista")
+ * que pertencem ao /chat, não a uma fila de aprovação.
+ *
+ * Critério atual: **aprovação significa ação concreta** (aprovar/rejeitar/executar).
+ * Decision PENDING tem isso. Mensagens não.
+ *
+ * Conversa fica no /chat (thread luis-augusto) + feed da empresa abaixo.
  */
 
 import { useState, useTransition } from 'react';
@@ -283,32 +286,28 @@ function PendingDecisionCard({ dec }: { dec: PendingDecision }) {
 }
 
 interface Props {
-  pendingMessages: PendingMessage[];
   pendingDecisions: PendingDecision[];
+  /** @deprecated kept pra backward compat — não é mais usado */
+  pendingMessages?: PendingMessage[];
 }
 
-export function PendingApprovals({ pendingMessages, pendingDecisions }: Props) {
-  const total = pendingMessages.length + pendingDecisions.length;
-
-  if (total === 0) {
-    return null; // não renderiza nada se não há pendências
+export function PendingApprovals({ pendingDecisions }: Props) {
+  if (pendingDecisions.length === 0) {
+    return null;
   }
 
   return (
     <section className="rounded-2xl border-2 border-purple-300 bg-gradient-to-br from-purple-50/60 to-white p-4 shadow-sm">
       <header className="mb-3 flex items-baseline justify-between">
         <h2 className="text-lg font-bold text-navy">
-          📥 Pendente da sua aprovação <span className="text-xs font-normal text-navy/55">({total})</span>
+          📥 Pendente da sua aprovação{' '}
+          <span className="text-xs font-normal text-navy/55">({pendingDecisions.length})</span>
         </h2>
       </header>
 
       <div className="space-y-3">
-        {/* Decisions primeiro (geralmente mais urgentes — outbound msg pode ser bloqueante) */}
         {pendingDecisions.map((d) => (
           <PendingDecisionCard key={`dec:${d.id}`} dec={d} />
-        ))}
-        {pendingMessages.map((m) => (
-          <PendingMessageCard key={`msg:${m.id}`} msg={m} />
         ))}
       </div>
     </section>

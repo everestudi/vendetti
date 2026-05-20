@@ -24,7 +24,7 @@ export const dynamic = 'force-dynamic';
 export const revalidate = 10;
 
 export default async function EmpresaPage() {
-  const [agents, recentMessages, recentRuns, totalSpent, pendingApprovalMsgs, pendingDecisions] = await Promise.all([
+  const [agents, recentMessages, recentRuns, totalSpent, pendingDecisions] = await Promise.all([
     prisma.agent.findMany({
       where: { active: true },
       orderBy: { slug: 'asc' },
@@ -48,21 +48,6 @@ export default async function EmpresaPage() {
     prisma.agent.aggregate({
       where: { active: true },
       _sum: { spentUsdMonth: true, budgetUsdMonth: true },
-    }),
-    // Mensagens pendentes da aprovação do Luís — APENAS do Augusto (canal único).
-    // Subagentes mandam pra Augusto, ele decide o que escalar com kind=QUESTION
-    // (espera resposta) ou ALERT (urgente). Outros kinds (NOTE/INSIGHT) só ficam
-    // no feed sem botão de ação.
-    prisma.agentMessage.findMany({
-      where: {
-        kind: { in: ['QUESTION', 'ALERT', 'PROPOSAL', 'REQUEST'] },
-        status: { in: ['DELIVERED', 'READ'] },
-        toAgentId: null, // pro humano (Luís)
-        fromAgent: { slug: 'augusto' }, // SÓ do Augusto — subagentes não escalam direto
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 20,
-      include: { fromAgent: { select: { slug: true, name: true, emoji: true } } },
     }),
     // Decisions PENDING — inclui `data` pra renderizar outbound msg com body completo
     prisma.decision.findMany({
@@ -182,20 +167,11 @@ export default async function EmpresaPage() {
         </div>
       )}
 
-      {/* PENDENTES DE APROVAÇÃO — aparece destacado entre header e grid */}
-      {(pendingApprovalMsgs.length > 0 || pendingDecisions.length > 0) && (
+      {/* PENDENTES DE APROVAÇÃO — só Decisions com ação concreta (aprovar/rejeitar/executar).
+          Perguntas/notas do Augusto ficam no chat e no feed, não aqui. */}
+      {pendingDecisions.length > 0 && (
         <div className="mb-6">
           <PendingApprovals
-            pendingMessages={pendingApprovalMsgs.map((m) => ({
-              id: m.id,
-              fromSlug: m.fromAgent?.slug ?? 'unknown',
-              fromName: m.fromAgent?.name ?? 'Agente desconhecido',
-              fromEmoji: m.fromAgent?.emoji ?? '🤖',
-              kind: m.kind,
-              body: m.body,
-              createdAt: m.createdAt.toISOString(),
-              threadId: m.threadId,
-            }))}
             pendingDecisions={pendingDecisions.map((d) => {
               const data = (d.data ?? {}) as Record<string, unknown>;
               const outbound = data.outboundMessage as
