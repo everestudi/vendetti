@@ -7,8 +7,6 @@
 
 import { prisma } from './db';
 import { STALE_THRESHOLDS_H } from './infra/health';
-import Anthropic from '@anthropic-ai/sdk';
-import { getSecret } from './secrets';
 import { getMonthlyRevenueComparison } from './vendetti/mara/analytics';
 
 const brl = (n: number) =>
@@ -293,51 +291,22 @@ export interface AugustoCommentary {
   cached: boolean;
 }
 
-const AUGUSTO_SYSTEM_PROMPT = `Você é **Augusto Vendetti**, CEO da vending machine TCN Pro 6G no Blue Mall Rondon, Uberlândia/MG. Você reporta pro Luís Neto (dono, em São Paulo) num briefing curto e executivo a cada refresh do dashboard.
-
-## QUEM VOCÊ É
-Um CEO de verdade — pensa em P&L, ciclo de vida do estoque, margem por SKU, sazonalidade, alavancas operacionais. Não é um chatbot que descreve métricas. Você antecipa, hipóteta, recomenda.
-
-## REGRA DE OURO: comparar mês a mês de forma JUSTA
-- O **mês atual é PARCIAL**. Hoje é dia D do mês. NUNCA compare o mês atual (parcial) com o mês anterior FECHADO — é apples-to-oranges.
-- Sempre compare \`total_mes_atual_mtd\` (faturamento até hoje) com \`total_mes_anterior_mesmo_periodo\` (mês anterior acumulado até o MESMO dia D). Isso é apples-to-apples.
-- Se quiser projetar fim de mês, faça extrapolação explícita ("se continuar nesse ritmo, fecha em ~R$X") e marque como projeção.
-- Mês anterior fechado serve só como benchmark histórico, não como comparação direta.
-
-## SOBRE A OPERAÇÃO
-- 6 agentes IA em torno seu (Mara analítica, Bruno comprador, Rita ops, Zelda auditora, Lúcia SAC, e você Augusto CEO). Eles não são reais ainda — você opera tudo via tools chamadas por prefixo (mara_*, bruno_*, etc).
-- Margem mínima dura: 35%. Abaixo disso, slot é candidato a re-precificar OU substituir SKU.
-- Z-API só outbound (nunca responde mensagem recebida). Weverton (zelador Bluemall) faz abastecimento físico.
-- Custo de capital: estoque parado é custo. SKU sem giro é problema, não conforto.
-
-## ESTILO
-- Português BR informal mas profissional. Direto, sem cerimônia, sem elogio vazio.
-- Foco em INSIGHTS + AÇÕES. O Luís já vê os números — você adiciona interpretação.
-- 2 parágrafos curtos (4-6 linhas total) no "text". Tom de equipe ("rodei isso, achei aquilo, sugiro X").
-- Se a comparação não dá pra fazer ainda (poucos dias do mês), DIGA isso ao invés de inventar tendência.
-- Se algo tá stale/quebrado, abra com isso.
-
-## PROCESSO ANTES DE RESPONDER (reflexão interna)
-Antes do JSON final, pense passo a passo (mas NÃO mostre no output):
-1. Os dados são confiáveis (sync recente)? Se não → reporta isso primeiro.
-2. Quantos dias do mês já passaram? Comparação MTD vs LMTD faz sentido?
-3. Onde está o sinal mais forte: aceleração/desaceleração, slot crítico, margem baixa, SAC escalada, sync stale?
-4. Quais 2-3 alavancas o Luís pode puxar HOJE pra mudar resultado?
-
-## OUTPUT — APENAS JSON, sem markdown, sem comentário:
-{
-  "text": "<2 parágrafos curtos · interpretação executiva>",
-  "insights": ["<padrão/anomalia 1>", "<padrão 2>", "<padrão 3>"],
-  "actions": ["<ação concreta 1>", "<ação 2>", "<ação 3>"]
-}`;
-
 /**
- * Gera commentary CEO do Augusto a cada refresh.
- * Cache em WorkerRun(name='augusto_commentary') com TTL 5min pra evitar
- * uma call Haiku por refresh.
+ * Gera commentary CEO do Augusto a cada refresh da home.
+ *
+ * Implementação atual (PR C): usa runAgent('augusto', mode='home_commentary')
+ * que já se beneficia do prompt caching (PROPOSAL #1 medido em -74.7% custo).
+ *
+ * Stack de cache em 2 níveis:
+ * 1. WorkerRun (5min TTL): UI rebusca instantâneo — `cached: true` na resposta
+ * 2. Anthropic prompt cache (5min TTL): runs do Augusto cobrem system+tools
+ *    estáveis — primeira run da janela ~$0.20, subsequentes ~$0.07
+ *
+ * Prompt de modo está em src/lib/agents/seed.ts (Augusto promptCore, seção
+ * "MODO HOME COMMENTARY") — formato JSON estruturado pra UI parsear.
  */
 export async function getAugustoCommentary(): Promise<AugustoCommentary | null> {
-  // Cache lookup
+  // Nível 1 de cache: WorkerRun 5min
   const recent = await prisma.workerRun.findFirst({
     where: { name: 'augusto_commentary', status: 'OK', startedAt: { gte: new Date(Date.now() - 5 * 60 * 1000) } },
     orderBy: { startedAt: 'desc' },
@@ -355,11 +324,7 @@ export async function getAugustoCommentary(): Promise<AugustoCommentary | null> 
     }
   }
 
-  // Gera novo via Haiku
-  const apiKey = await getSecret('ANTHROPIC_API_KEY');
-  if (!apiKey) return null;
-
-  // Coleta contexto
+  // Coleta contexto pra mandar como payload pro Augusto
   const [revenueSeries, daily, pending, syncStatus, lowMargin, criticalEverest] = await Promise.all([
     getMonthlyRevenueSeries(6),
     getDailyRevenueComparison(),
@@ -435,44 +400,44 @@ export async function getAugustoCommentary(): Promise<AugustoCommentary | null> 
     everest_zerado: criticalEverest,
   };
 
-  const anthropic = new Anthropic({ apiKey });
+  // Augusto via runtime real (PROPOSAL #1 caching já ativa → primeira call escreve
+  // cache; calls subsequentes na janela 5min vêm a $0.07-0.10).
+  // payload.mode='home_commentary' faz Augusto seguir formato JSON estruturado
+  // sem chamar tools (context já vem no payload).
   try {
-    const msg = await anthropic.messages.create({
-      // Sonnet 4.5 — qualidade muito superior pra raciocínio executivo; custo ~$0.003/briefing
-      // (5x Haiku mas o cache de 5min mantém volume baixo). Vale a pena.
-      model: 'claude-sonnet-4-5-20250929',
-      max_tokens: 2048,
-      system: AUGUSTO_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: 'user',
-          content: `Estado da operação agora (passa pela reflexão interna do prompt antes do JSON):\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
-        },
-      ],
+    const { runAgent } = await import('./agents/runtime');
+    const { runId, result } = await runAgent({
+      agentSlug: 'augusto',
+      trigger: 'CRON',
+      triggerRef: `home_commentary:${new Date().toISOString().slice(0, 13)}`, // 1 ref por hora
+      payload: {
+        mode: 'home_commentary',
+        context,
+      },
     });
 
-    const text = msg.content
-      .filter((c) => c.type === 'text')
-      .map((c) => (c as { type: 'text'; text: string }).text)
-      .join('\n')
-      .trim();
-    const cleaned = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
-    let parsed: { text: string; insights: string[]; actions: string[] };
-    try {
-      parsed = JSON.parse(cleaned);
-    } catch {
-      console.warn('[augusto commentary] JSON inválido:', cleaned.slice(0, 200));
+    // Parse JSON do outputMd — aceita: bloco ```json, JSON puro, ou JSON
+    // dentro de prosa
+    const parsed = parseAugustoJsonOutput(result.outputMd);
+    if (!parsed) {
+      console.warn('[augusto commentary] JSON inválido no output do run', runId, ':', result.outputMd.slice(0, 200));
       return null;
     }
 
-    // Cache em WorkerRun
+    // Cache em WorkerRun pra UI rebusca rápido — cache de 5min sobre o cache
+    // de prompt do runtime (que cacheia tools+system; aqui cacheamos a resposta
+    // inteira pra ser instant em refresh repetido)
     const now = new Date();
     await prisma.workerRun.create({
       data: {
         name: 'augusto_commentary',
         status: 'OK',
         finishedAt: now,
-        meta: parsed as never,
+        meta: {
+          ...parsed,
+          runId,
+          costUsd: result.costUsd,
+        } as never,
       },
     }).catch(() => undefined);
 
@@ -481,4 +446,37 @@ export async function getAugustoCommentary(): Promise<AugustoCommentary | null> 
     console.warn('[augusto commentary]', err instanceof Error ? err.message : err);
     return null;
   }
+}
+
+/** Parser tolerante — extrai JSON de markdown, prosa misturada, ou JSON puro. */
+function parseAugustoJsonOutput(output: string): { text: string; insights: string[]; actions: string[] } | null {
+  if (!output) return null;
+
+  // Tenta 1: bloco ```json ... ```
+  const jsonBlockMatch = output.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  const candidates: string[] = [];
+  if (jsonBlockMatch) candidates.push(jsonBlockMatch[1]);
+
+  // Tenta 2: maior bloco { ... } no output
+  const braceMatch = output.match(/\{[\s\S]*\}/);
+  if (braceMatch) candidates.push(braceMatch[0]);
+
+  // Tenta 3: output inteiro (caso seja JSON puro)
+  candidates.push(output.trim());
+
+  for (const c of candidates) {
+    try {
+      const obj = JSON.parse(c) as { text?: string; insights?: unknown; actions?: unknown };
+      if (typeof obj.text === 'string') {
+        return {
+          text: obj.text,
+          insights: Array.isArray(obj.insights) ? obj.insights.filter((x): x is string => typeof x === 'string') : [],
+          actions: Array.isArray(obj.actions) ? obj.actions.filter((x): x is string => typeof x === 'string') : [],
+        };
+      }
+    } catch {
+      // tenta próximo candidato
+    }
+  }
+  return null;
 }
