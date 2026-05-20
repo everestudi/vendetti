@@ -105,8 +105,6 @@ export async function rejectDecision(formData: FormData) {
   });
 
   // 🤖 Envia evento pra Zelda auditar — entender PADRÕES de rejeição.
-  // Se Luís rejeita muitas decisions do mesmo tipo (ex: RESTOCK_TASK com
-  // matcher errado), Zelda detecta e propõe fix.
   await prisma.workerRun.create({
     data: {
       name: 'decision_rejected',
@@ -123,6 +121,71 @@ export async function rejectDecision(formData: FormData) {
       } as never,
     },
   }).catch((e) => console.warn('[decision_rejected log]', e instanceof Error ? e.message : e));
+
+  // 🔁 FEEDBACK LOOP — identifica autor da Decision e cria msg/wakeup pra ele
+  // ajustar. Sem isso, rejeitar com motivo é só comentário pro vazio.
+  try {
+    const data = (dec.data ?? {}) as Record<string, unknown>;
+    const outbound = data.outboundMessage as { proposedBy?: string; body?: string; channel?: string } | undefined;
+    // Pista 1: outbound.proposedBy (Rita propose).
+    // Pista 2: data.author / data.proposedByAgentSlug (extender no futuro)
+    // Fallback: 'augusto' (Chief of Staff sempre fica a par)
+    const authorSlug = outbound?.proposedBy ?? (data.proposedByAgentSlug as string | undefined) ?? 'augusto';
+
+    const author = await prisma.agent.findUnique({ where: { slug: authorSlug } });
+    if (author && author.active && !author.paused) {
+      const previewBody = dec.summary.slice(0, 120) + (outbound?.body ? `\n\nTexto que foi rejeitado:\n"${outbound.body}"` : '');
+
+      const msg = await prisma.agentMessage.create({
+        data: {
+          fromAgentId: null, // do Luís
+          toAgentId: author.id,
+          threadId: 'rejection-feedback',
+          kind: 'REQUEST',
+          body: `❌ Sua Decision \`${id.slice(-6)}\` foi REJEITADA pelo Luís.\n\n**Motivo dele:**\n${reasonText || reasonCategory}\n\n**Decision rejeitada:**\n${previewBody}\n\n**O que fazer:**\n- Lê com atenção o motivo (o Luís deu diretriz importante, não só desistiu)\n- AJUSTE a proposta e CRIE NOVA Decision (não tenta a mesma rejeitada de novo)\n- Se o motivo for "desiste" sem ajuste possível, NÃO crie nova — só reporta pro Augusto que abortou`,
+          refs: {
+            rejectedDecisionId: id,
+            decisionKind: dec.kind,
+          },
+          status: 'DELIVERED',
+        },
+      });
+
+      const { enqueueWakeup } = await import('@/lib/agents/runtime');
+      await enqueueWakeup({
+        agentSlug: authorSlug,
+        trigger: 'MAILBOX',
+        triggerRef: msg.id,
+        idempotencyKey: `rejection-feedback:${id}`,
+        payload: { messageId: msg.id, rejectedDecisionId: id, reasonText, reasonCategory },
+      });
+
+      // Augusto também recebe cópia pra ficar a par (Chief of Staff)
+      const augusto = await prisma.agent.findUnique({ where: { slug: 'augusto' } });
+      if (augusto && augusto.id !== author.id) {
+        const cc = await prisma.agentMessage.create({
+          data: {
+            fromAgentId: null,
+            toAgentId: augusto.id,
+            threadId: 'luis-augusto',
+            kind: 'NOTE',
+            body: `FYI: Decision \`${id.slice(-6)}\` (${dec.kind}) foi rejeitada. Avisei ${authorSlug} pra ajustar.\n\nMotivo: ${reasonText || reasonCategory}`,
+            refs: { rejectedDecisionId: id, ccFor: 'augusto-awareness' },
+            status: 'DELIVERED',
+          },
+        });
+        await enqueueWakeup({
+          agentSlug: 'augusto',
+          trigger: 'MAILBOX',
+          triggerRef: cc.id,
+          idempotencyKey: `rejection-cc:${id}`,
+          payload: { messageId: cc.id, rejectedDecisionId: id },
+        });
+      }
+    }
+  } catch (e) {
+    console.warn('[rejectDecision feedback loop]', e instanceof Error ? e.message : e);
+  }
 
   revalidatePath('/decisions');
 }
