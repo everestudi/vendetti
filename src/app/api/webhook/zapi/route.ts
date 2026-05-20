@@ -28,7 +28,9 @@ import { prisma } from '@/lib/db';
 import type { Prisma } from '@prisma/client';
 
 export const runtime = 'nodejs';
-export const maxDuration = 30;
+// Augusto Opus 4.7 leva ~10-30s pra responder com tool calling. maxDuration
+// elevado pra cobrir a run inline + sendText de volta via Z-API.
+export const maxDuration = 60;
 
 // Circuit breaker em memória: mesma phone só pode disparar processamento 1x a cada 3s.
 const lastSeen = new Map<string, number>();
@@ -218,37 +220,48 @@ export async function POST(req: Request) {
           },
         });
 
-        // Enfileira wakeup
-        const { enqueueWakeup } = await import('@/lib/agents/runtime');
-        await enqueueWakeup({
-          agentSlug: 'augusto',
-          trigger: 'MAILBOX',
-          triggerRef: msg.id,
-          idempotencyKey: `whatsapp:${msg.id}`,
-          payload: { messageId: msg.id, threadId: 'luis-augusto', channel: 'whatsapp' },
-        });
-
-        // Fire-and-forget: dispara /api/tick pra processar imediato (não bloqueia o webhook)
-        const cronSecret = await getSecret('CRON_SECRET');
-        if (cronSecret) {
-          const tickUrl = `${new URL(req.url).origin}/api/tick`;
-          fetch(tickUrl, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${cronSecret}`,
-              'Content-Type': 'application/json',
+        // Roda Augusto INLINE (Vercel serverless mata fire-and-forget — precisa await).
+        // Timeout safety: maxDuration do route é 30s, Augusto cabe em ~7-20s normalmente.
+        // Se rodar mais que isso, falha e o cron processa depois.
+        try {
+          const { runAgent } = await import('@/lib/agents/runtime');
+          await runAgent({
+            agentSlug: 'augusto',
+            trigger: 'MAILBOX',
+            triggerRef: msg.id,
+            payload: {
+              messageId: msg.id,
+              threadId: 'luis-augusto',
+              channel: 'whatsapp',
+              userText: effectiveText,
+              // Hint pro Augusto: msg veio do WhatsApp, responda no MESMO canal
+              // via augusto_notify_luis pra fechar o loop.
+              expectedReplyChannel: 'whatsapp',
             },
-            body: JSON.stringify({ maxRuns: 1 }),
-          }).catch((e) => console.warn('[admin-text tick fire-and-forget]', e));
+          });
+        } catch (runErr) {
+          console.error('[webhook admin → augusto runAgent]', runErr);
+          // Fallback: enfileira wakeup pro cron processar depois
+          const { enqueueWakeup } = await import('@/lib/agents/runtime');
+          await enqueueWakeup({
+            agentSlug: 'augusto',
+            trigger: 'MAILBOX',
+            triggerRef: msg.id,
+            idempotencyKey: `whatsapp-fallback:${msg.id}`,
+            payload: { messageId: msg.id, threadId: 'luis-augusto', channel: 'whatsapp' },
+          });
+          // Avisa Luís que travou
+          await sendText(
+            body.phone,
+            '⚠️ Travei processando sua msg. Vou tentar de novo em alguns minutos. Se for urgente, manda no /chat em vendetti.everest.udi.br/empresa.',
+          );
         }
 
-        // Não responde nada via Z-API agora — Augusto vai responder quando processar
-        // (via augusto_notify_luis tool).
         return NextResponse.json({
           ok: true,
           route: 'admin-text-to-augusto',
           messageId: msg.id,
-          note: 'Mensagem encaminhada ao Augusto. Resposta dele virá via Z-API (augusto_notify_luis) ou só na UI /empresa.',
+          note: 'Mensagem encaminhada e processada pelo Augusto inline.',
         });
       } catch (e) {
         console.error('[admin-text → augusto]', e);
