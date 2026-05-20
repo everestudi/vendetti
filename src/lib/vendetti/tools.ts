@@ -171,14 +171,35 @@ export const decision_create = tool({
       },
       select: { id: true, status: true, createdAt: true },
     });
+
+    // PROPOSAL #2 (Gabi): trigger automático — toda Decision criada acorda Zelda
+    // pra auditar. Se Zelda agent estiver seedada e ativa, enfileira wakeup.
+    // Idempotência: 1 wakeup por Decision (evita Augusto chamar decision_create
+    // 2x e disparar Zelda 2x pra mesma decisão).
+    try {
+      const { enqueueWakeup } = await import('../agents/runtime');
+      const zelda = await prisma.agent.findUnique({ where: { slug: 'zelda' } });
+      if (zelda && zelda.active && !zelda.paused) {
+        await enqueueWakeup({
+          agentSlug: 'zelda',
+          trigger: 'AUTOMATION',
+          triggerRef: d.id,
+          idempotencyKey: `audit-decision:${d.id}`,
+          payload: { decisionId: d.id, kind, level, summary },
+        });
+      }
+    } catch (e) {
+      console.warn('[decision_create] zelda wakeup falhou (não-fatal):', e instanceof Error ? e.message : e);
+    }
+
     return {
       decisionId: d.id,
       status: d.status,
       createdAt: d.createdAt.toISOString(),
       note:
         level === 'GREEN'
-          ? 'Auto-aprovada (🟢). Pode executar.'
-          : 'Aguardando aprovação humana. NÃO execute ainda.',
+          ? 'Auto-aprovada (🟢). Pode executar. Zelda foi notificada pra auditar.'
+          : 'Aguardando aprovação humana. NÃO execute ainda. Zelda foi notificada pra revisar policies.',
     };
   },
 });
