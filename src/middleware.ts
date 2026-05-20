@@ -10,6 +10,7 @@ const PUBLIC_PREFIXES = [
   '/api/inquiries', // auth via Bearer INQUIRIES_API_KEY no próprio endpoint
   '/api/zelda', // auth via x-service-key (CRON_SECRET) no próprio endpoint
   '/api/agent-log', // poll de logs no AgentTerminal (já com cookie da UI)
+  '/api/tick', // auth via Bearer CRON_SECRET no próprio endpoint (chamado por GH Actions)
   '/_next',
   '/favicon',
 ];
