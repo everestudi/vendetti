@@ -54,3 +54,6 @@ prisma/migrations/
 # IDE
 .vscode/
 .idea/
+
+# Claude Code local state
+.claude/

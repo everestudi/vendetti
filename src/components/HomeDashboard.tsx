@@ -10,18 +10,22 @@
 import Link from 'next/link';
 import { MonthlyRevenuePoint, AgentPending, SyncStatus, DailyComparisonPoint, AugustoCommentary } from '@/lib/dashboard';
 import { forceMaraSync } from '@/app/actions';
-import { RevenueCharts } from './RevenueCharts';
+import { RevenueChartHome } from './RevenueChartHome';
 import { SubmitButton } from './SubmitButton';
 
 interface Props {
   revenueSeries: MonthlyRevenuePoint[];
-  dailyComparison: { points: DailyComparisonPoint[]; totals: { thisMonth: number; lastMonth: number }; monthLabels: { thisMonth: string; lastMonth: string } };
+  dailyComparison: {
+    points: DailyComparisonPoint[];
+    totals: { thisMonth: number; lastMonth: number; lastMonthToDay: number };
+    monthLabels: { thisMonth: string; lastMonth: string };
+    todayOfMonth: number;
+  };
   syncStatus: SyncStatus;
   pending: AgentPending[];
   augusto: AugustoCommentary | null;
   syncFeedback?: 'triggered' | 'failed' | null;
   syncFeedbackError?: string;
-  imagesFeedback?: string; // ex: "12/45 (3 falharam)"
 }
 
 const brl = (n: number) =>
@@ -33,7 +37,7 @@ const LEVEL_CLS: Record<AgentPending['level'], { card: string; badge: string }> 
   critical: { card: 'border-rose-300 bg-rose-50/60', badge: 'bg-rose-100 text-rose-800' },
 };
 
-export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pending, augusto, syncFeedback, syncFeedbackError, imagesFeedback }: Props) {
+export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pending, augusto, syncFeedback, syncFeedbackError }: Props) {
   // Filtra meses com dado (remove os 0 antigos que confundem o gráfico)
   const seriesWithData = revenueSeries.filter((p) => p.revenue > 0);
   // Mantém último mês mesmo zerado (mês atual parcial)
@@ -47,10 +51,17 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
   const previousMonth = effectiveSeries[effectiveSeries.length - 2];
   const monthRevenue = currentMonth?.revenue ?? 0;
   const monthTxCount = currentMonth?.txCount ?? 0;
-  const previousRevenue = previousMonth?.revenue ?? 0;
-  const deltaPct =
-    previousRevenue > 0 ? Math.round(((monthRevenue - previousRevenue) / previousRevenue) * 100) : null;
+  const previousRevenueClosed = previousMonth?.revenue ?? 0;
   const totalRevenue6m = effectiveSeries.slice(-6).reduce((s, p) => s + p.revenue, 0);
+
+  // === Comparação JUSTA: mês atual vs mês anterior MESMO PERÍODO (até hoje) ===
+  const today = dailyComparison.todayOfMonth;
+  const lastMonthToDay = dailyComparison.totals.lastMonthToDay;
+  const deltaPctFair =
+    lastMonthToDay > 0 ? Math.round(((monthRevenue - lastMonthToDay) / lastMonthToDay) * 100) : null;
+  // Pace projection: se ritmo atual continuar, quanto fecha o mês?
+  const lastMonthFullDays = previousMonth?.txCount ? 30 : 30; // proxy — TODO usar dias reais do mês anterior
+  const projectedRevenue = today > 0 ? (monthRevenue / today) * lastMonthFullDays : monthRevenue;
 
   const ageStr = syncStatus.ageHours == null
     ? '—'
@@ -79,13 +90,6 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           <Link href="/" className="ml-2 text-xs underline">fechar</Link>
         </div>
       )}
-      {imagesFeedback && (
-        <div className="mb-4 rounded-lg border-2 border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
-          🖼️ <strong>Imagens atualizadas:</strong> {imagesFeedback}
-          <Link href="/" className="ml-2 text-xs underline">fechar</Link>
-        </div>
-      )}
-
       {/* ===== SEÇÃO 1 · FATURAMENTO ===== */}
       <section className="mb-8 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
         <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
@@ -101,29 +105,37 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           </form>
         </header>
 
-        {/* KPIs faturamento (4 cards) */}
+        {/* KPIs faturamento — comparação JUSTA: mês atual vs anterior MESMO PERÍODO */}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
           <Kpi
-            label={`Mês atual · ${currentMonth?.label ?? ''}`}
+            label={`Mês atual · ${currentMonth?.label ?? ''} (até dia ${today})`}
             value={brl(monthRevenue)}
             sub={
-              deltaPct == null
-                ? `${monthTxCount} vendas`
-                : `${monthTxCount} vendas · ${deltaPct >= 0 ? '+' : ''}${deltaPct}% vs anterior`
+              deltaPctFair == null
+                ? `${monthTxCount} vendas · mês parcial`
+                : `${monthTxCount} vendas · ${deltaPctFair >= 0 ? '+' : ''}${deltaPctFair}% vs mesmo período do mês anterior`
             }
-            tone={deltaPct == null ? 'neutral' : deltaPct >= 0 ? 'positive' : 'negative'}
+            tone={deltaPctFair == null ? 'neutral' : deltaPctFair >= 0 ? 'positive' : 'negative'}
           />
           <Kpi
-            label={`Mês anterior · ${previousMonth?.label ?? ''}`}
-            value={brl(previousRevenue)}
-            sub={previousMonth ? `${previousMonth.txCount} vendas` : '—'}
+            label={`${previousMonth?.label ?? 'Mês anterior'} · até dia ${today}`}
+            value={brl(lastMonthToDay)}
+            sub={
+              previousMonth
+                ? `comparável · fechou em ${brl(previousRevenueClosed)} (mês completo)`
+                : '—'
+            }
             tone="neutral"
           />
           <Kpi
-            label="6 meses (média)"
-            value={brl(totalRevenue6m / Math.min(6, effectiveSeries.length))}
-            sub={`total ${brl(totalRevenue6m)}`}
-            tone="neutral"
+            label="Projeção fim do mês"
+            value={brl(projectedRevenue)}
+            sub={
+              previousRevenueClosed > 0
+                ? `extrapolando ritmo atual · ${projectedRevenue >= previousRevenueClosed ? '+' : ''}${Math.round(((projectedRevenue - previousRevenueClosed) / previousRevenueClosed) * 100)}% vs mês anterior fechado`
+                : 'extrapolando ritmo atual'
+            }
+            tone={projectedRevenue >= previousRevenueClosed ? 'positive' : 'warn'}
           />
           <Kpi
             label="Última sincronização"
@@ -137,8 +149,20 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           />
         </div>
 
-        {/* Gráficos com toggle (client) */}
-        <RevenueCharts series={effectiveSeries} dailyPoints={dailyComparison.points} monthLabels={dailyComparison.monthLabels} />
+        {/* Gráfico recharts — linha mês atual vs anterior com tooltip rico (MTD vs LMTD) */}
+        <div className="mt-6 rounded-lg border border-navy/10 bg-navy-50/30 p-4">
+          <h3 className="mb-3 text-sm font-semibold text-navy">
+            Faturamento diário · mês atual vs anterior <span className="font-normal text-navy/55">(passe o mouse pra ver acumulado)</span>
+          </h3>
+          <RevenueChartHome
+            points={dailyComparison.points}
+            labels={dailyComparison.monthLabels}
+            todayOfMonth={dailyComparison.todayOfMonth}
+          />
+          <div className="mt-2 text-[10px] text-navy/45">
+            Linha tracejada vertical = hoje. Acumulado no tooltip compara MTD (mês atual até dia D) com LMTD (mesmo período do mês anterior).
+          </div>
+        </div>
 
         {syncStatus.isStale && (
           <p className="mt-2 text-[11px] text-rose-700">

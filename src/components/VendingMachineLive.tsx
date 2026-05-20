@@ -157,7 +157,7 @@ function SlotTile({
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onClick={onClick}
-      className={`group relative flex aspect-[3/4] flex-col items-stretch justify-between overflow-hidden rounded border ${bgClass} transition ${
+      className={`group relative flex aspect-[3/4] flex-col overflow-hidden rounded border ${bgClass} transition ${
         isSelected
           ? 'border-gold border-2 scale-105 z-10 shadow-md'
           : 'border-navy/15 hover:scale-110 hover:border-navy/40 hover:z-10 hover:shadow'
@@ -166,8 +166,8 @@ function SlotTile({
       {/* Número do slot no canto superior esquerdo (mono, discreto) */}
       <div className="absolute left-0.5 top-0 z-10 rounded-br bg-white/80 px-1 py-px font-mono text-[8px] font-bold text-navy/65">{slot.selecao}</div>
 
-      {/* IMAGEM grande ocupando 75% do tile */}
-      <div className="flex h-[75%] items-center justify-center px-1 pt-2">
+      {/* IMAGEM ocupa o espaço restante (flex-1) — encolhe se faltar lugar */}
+      <div className="flex min-h-0 flex-1 items-center justify-center px-1 pt-2.5">
         {slot.productImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -181,24 +181,24 @@ function SlotTile({
         )}
       </div>
 
-      {/* Barrinha mola: mini bateria horizontal */}
-      <div className="mt-0.5 flex w-full items-center gap-px px-1">
-        {Array.from({ length: Math.min(cap, 8) }).map((_, i) => {
-          const filled = i < Math.floor(qtyPct * Math.min(cap, 8));
-          return (
-            <div
-              key={i}
-              className={`h-1 flex-1 rounded-sm ${filled ? qtyColor : 'bg-navy/15'}`}
-            />
-          );
-        })}
-      </div>
-
-      {/* Preço no formato BR R$X,XX embaixo */}
-      <div className="mb-0.5 mt-px flex w-full justify-center px-1">
-        {priceBR && (
-          <span className="font-mono text-[8px] font-bold text-navy/85">{priceBR}</span>
-        )}
+      {/* Footer fixo: bateria + preço, com altura garantida */}
+      <div className="flex shrink-0 flex-col gap-0.5 px-1 pb-1 pt-0.5">
+        <div className="flex w-full items-center gap-px">
+          {Array.from({ length: Math.min(cap, 8) }).map((_, i) => {
+            const filled = i < Math.floor(qtyPct * Math.min(cap, 8));
+            return (
+              <div
+                key={i}
+                className={`h-1 flex-1 rounded-sm ${filled ? qtyColor : 'bg-navy/15'}`}
+              />
+            );
+          })}
+        </div>
+        <div className="flex w-full justify-center leading-none">
+          {priceBR && (
+            <span className="font-mono text-[9px] font-bold text-navy/85">{priceBR}</span>
+          )}
+        </div>
       </div>
 
       {critical && (

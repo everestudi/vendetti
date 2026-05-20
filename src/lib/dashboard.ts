@@ -27,31 +27,67 @@ export interface DailyComparisonPoint {
   weekday: string; // 'seg', 'ter', 'qua', 'qui', 'sex', 'sab', 'dom'
   thisMonth: number | null;
   lastMonth: number | null;
+  /** Acumulado MTD até o dia (mês atual). null se dia >= hoje e sem dado. */
+  thisMonthCumulative: number | null;
+  /** Acumulado LMTD (mês anterior até o MESMO dia do mês). null se sem dado. */
+  lastMonthCumulative: number | null;
+  /** É um dia que já passou no mês atual (incluindo hoje)? */
+  isPastOrToday: boolean;
 }
 
-/** Faturamento diário do mês atual vs mês anterior, com dia da semana. */
-export async function getDailyRevenueComparison(): Promise<{
+/** Faturamento diário do mês atual vs mês anterior, com dia da semana + acumulados.
+ *
+ *  Princípio: comparação JUSTA. Mês atual é parcial — só faz sentido comparar com
+ *  mês anterior NO MESMO PERÍODO (LMTD = Last Month To Date). Cumulative arrays
+ *  permitem mostrar isso em tooltip e KPI.
+ */
+export async function getDailyRevenueComparison(now: Date = new Date()): Promise<{
   points: DailyComparisonPoint[];
-  totals: { thisMonth: number; lastMonth: number };
+  totals: {
+    thisMonth: number;
+    lastMonth: number;
+    /** Mês anterior acumulado até o dia D (D = dia atual). Comparável com totals.thisMonth. */
+    lastMonthToDay: number;
+  };
   monthLabels: { thisMonth: string; lastMonth: string };
+  /** Dia atual do mês — referência pra "até onde" comparar mês anterior. */
+  todayOfMonth: number;
 }> {
-  const data = await getMonthlyRevenueComparison();
-  const now = new Date();
+  const data = await getMonthlyRevenueComparison(now);
+  const today = now.getDate();
+  const weekdayNames = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+
+  let thisCum = 0;
+  let lastCum = 0;
+  let lastMonthToDay = 0;
+
   const points: DailyComparisonPoint[] = data.points.map((p) => {
-    // Weekday do dia do mês atual (assumindo o dia existe no mês atual)
     const ref = new Date(now.getFullYear(), now.getMonth(), p.day);
-    const weekdayNames = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'];
+    if (p.thisMonth !== null) thisCum += p.thisMonth;
+    if (p.lastMonth !== null) lastCum += p.lastMonth;
+    if (p.day <= today && p.lastMonth !== null) lastMonthToDay = lastCum;
+
+    const isPastOrToday = p.day <= today;
     return {
       day: p.day,
       weekday: weekdayNames[ref.getDay()],
       thisMonth: p.thisMonth,
       lastMonth: p.lastMonth,
+      thisMonthCumulative: isPastOrToday ? thisCum : null,
+      lastMonthCumulative: lastCum > 0 ? lastCum : null,
+      isPastOrToday,
     };
   });
+
   return {
     points,
-    totals: data.totals,
+    totals: {
+      thisMonth: data.totals.thisMonth,
+      lastMonth: data.totals.lastMonth,
+      lastMonthToDay,
+    },
     monthLabels: data.monthLabels,
+    todayOfMonth: today,
   };
 }
 
@@ -257,20 +293,42 @@ export interface AugustoCommentary {
   cached: boolean;
 }
 
-const AUGUSTO_SYSTEM_PROMPT = `Você é Augusto Vendetti, CEO da vending machine BlueMall Rondon. Em cada refresh do dashboard, você dá um briefing executivo curto pro Luís (dono) — como um CEO comentando o estado da operação pro investidor.
+const AUGUSTO_SYSTEM_PROMPT = `Você é **Augusto Vendetti**, CEO da vending machine TCN Pro 6G no Blue Mall Rondon, Uberlândia/MG. Você reporta pro Luís Neto (dono, em São Paulo) num briefing curto e executivo a cada refresh do dashboard.
 
-REGRAS:
-- Tom direto, executivo, BR pt-BR informal mas profissional. Sem cerimônia.
-- Foco em INSIGHTS + AÇÕES, não em descrição do que tá vendo (Luís já vê os números).
-- Máximo 2 parágrafos curtos no "text" (4-6 linhas total).
-- 2-3 insights curtos (1 frase cada). Pattern, anomalia, oportunidade.
-- 2-3 ações concretas pra maximizar lucro/saúde. Não genérico — específicas pros dados que vê.
+## QUEM VOCÊ É
+Um CEO de verdade — pensa em P&L, ciclo de vida do estoque, margem por SKU, sazonalidade, alavancas operacionais. Não é um chatbot que descreve métricas. Você antecipa, hipóteta, recomenda.
 
-OUTPUT: APENAS JSON, sem markdown, formato:
+## REGRA DE OURO: comparar mês a mês de forma JUSTA
+- O **mês atual é PARCIAL**. Hoje é dia D do mês. NUNCA compare o mês atual (parcial) com o mês anterior FECHADO — é apples-to-oranges.
+- Sempre compare \`total_mes_atual_mtd\` (faturamento até hoje) com \`total_mes_anterior_mesmo_periodo\` (mês anterior acumulado até o MESMO dia D). Isso é apples-to-apples.
+- Se quiser projetar fim de mês, faça extrapolação explícita ("se continuar nesse ritmo, fecha em ~R$X") e marque como projeção.
+- Mês anterior fechado serve só como benchmark histórico, não como comparação direta.
+
+## SOBRE A OPERAÇÃO
+- 6 agentes IA em torno seu (Mara analítica, Bruno comprador, Rita ops, Zelda auditora, Lúcia SAC, e você Augusto CEO). Eles não são reais ainda — você opera tudo via tools chamadas por prefixo (mara_*, bruno_*, etc).
+- Margem mínima dura: 35%. Abaixo disso, slot é candidato a re-precificar OU substituir SKU.
+- Z-API só outbound (nunca responde mensagem recebida). Weverton (zelador Bluemall) faz abastecimento físico.
+- Custo de capital: estoque parado é custo. SKU sem giro é problema, não conforto.
+
+## ESTILO
+- Português BR informal mas profissional. Direto, sem cerimônia, sem elogio vazio.
+- Foco em INSIGHTS + AÇÕES. O Luís já vê os números — você adiciona interpretação.
+- 2 parágrafos curtos (4-6 linhas total) no "text". Tom de equipe ("rodei isso, achei aquilo, sugiro X").
+- Se a comparação não dá pra fazer ainda (poucos dias do mês), DIGA isso ao invés de inventar tendência.
+- Se algo tá stale/quebrado, abra com isso.
+
+## PROCESSO ANTES DE RESPONDER (reflexão interna)
+Antes do JSON final, pense passo a passo (mas NÃO mostre no output):
+1. Os dados são confiáveis (sync recente)? Se não → reporta isso primeiro.
+2. Quantos dias do mês já passaram? Comparação MTD vs LMTD faz sentido?
+3. Onde está o sinal mais forte: aceleração/desaceleração, slot crítico, margem baixa, SAC escalada, sync stale?
+4. Quais 2-3 alavancas o Luís pode puxar HOJE pra mudar resultado?
+
+## OUTPUT — APENAS JSON, sem markdown, sem comentário:
 {
-  "text": "<comentário executivo de 2 parágrafos>",
-  "insights": ["<insight 1>", "<insight 2>", "<insight 3>"],
-  "actions": ["<ação 1>", "<ação 2>", "<ação 3>"]
+  "text": "<2 parágrafos curtos · interpretação executiva>",
+  "insights": ["<padrão/anomalia 1>", "<padrão 2>", "<padrão 3>"],
+  "actions": ["<ação concreta 1>", "<ação 2>", "<ação 3>"]
 }`;
 
 /**
@@ -331,37 +389,64 @@ export async function getAugustoCommentary(): Promise<AugustoCommentary | null> 
     }).then((rows) => rows.map((r) => r.sku.name)),
   ]);
 
+  const today = daily.todayOfMonth;
+  // Dias úteis do mês anterior — proxy 30 (TODO: dias reais)
+  const lastMonthFullDays = 30;
+  const pace = today > 0 ? daily.totals.thisMonth / today : 0;
+  const projectedFullMonth = pace * lastMonthFullDays;
+
   const context = {
-    faturamento: {
-      mes_atual: revenueSeries[revenueSeries.length - 1],
-      mes_anterior: revenueSeries[revenueSeries.length - 2],
-      ultimos_6_meses: revenueSeries,
+    referencia_temporal: {
+      hoje_dia_do_mes: today,
+      mes_atual_e_parcial: true,
+      observacao_importante: `O mês atual tem só ${today} dias de dados. NUNCA compare R$${daily.totals.thisMonth.toFixed(0)} (parcial) com R$${daily.totals.lastMonth.toFixed(0)} (fechado). A comparação justa é MTD vs LMTD abaixo.`,
     },
-    diario_mes_vs_anterior: {
-      total_mes_atual: daily.totals.thisMonth,
-      total_mes_anterior: daily.totals.lastMonth,
-      pontos_recentes: daily.points.filter((p) => p.thisMonth !== null).slice(-10),
+    faturamento_mtd: {
+      mes_atual_mtd_ate_hoje: daily.totals.thisMonth,
+      mes_anterior_mesmo_periodo_lmtd: daily.totals.lastMonthToDay,
+      delta_pct_mtd_vs_lmtd:
+        daily.totals.lastMonthToDay > 0
+          ? Math.round(((daily.totals.thisMonth - daily.totals.lastMonthToDay) / daily.totals.lastMonthToDay) * 100)
+          : null,
+      mes_anterior_fechado: daily.totals.lastMonth,
+      projecao_fim_mes_se_ritmo_continuar: Math.round(projectedFullMonth),
+      label_mes_atual: revenueSeries[revenueSeries.length - 1]?.label,
+      label_mes_anterior: revenueSeries[revenueSeries.length - 2]?.label,
     },
+    serie_historica_6m: revenueSeries.slice(-6).map((p) => ({
+      label: p.label,
+      revenue: p.revenue,
+      txCount: p.txCount,
+      eh_mes_atual_parcial: p === revenueSeries[revenueSeries.length - 1],
+    })),
+    ultimos_dias: daily.points.filter((p) => p.isPastOrToday).slice(-7).map((p) => ({
+      dia: p.day,
+      weekday: p.weekday,
+      este_mes: p.thisMonth,
+      mes_anterior_mesmo_dia: p.lastMonth,
+    })),
     pendencias: pending.map((p) => ({ agente: p.label, count: p.count, level: p.level, resumo: p.summaryLines })),
     sync: {
       ultima: syncStatus.lastSnapshotAt,
       idade_horas: syncStatus.ageHours,
       stale: syncStatus.isStale,
     },
-    margens_baixas: lowMargin,
+    margens_baixas_top5: lowMargin,
     everest_zerado: criticalEverest,
   };
 
   const anthropic = new Anthropic({ apiKey });
   try {
     const msg = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
+      // Sonnet 4.5 — qualidade muito superior pra raciocínio executivo; custo ~$0.003/briefing
+      // (5x Haiku mas o cache de 5min mantém volume baixo). Vale a pena.
+      model: 'claude-sonnet-4-5-20250929',
+      max_tokens: 2048,
       system: AUGUSTO_SYSTEM_PROMPT,
       messages: [
         {
           role: 'user',
-          content: `Estado da operação agora:\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\`\n\nDá o briefing CEO. JSON puro.`,
+          content: `Estado da operação agora (passa pela reflexão interna do prompt antes do JSON):\n\n\`\`\`json\n${JSON.stringify(context, null, 2)}\n\`\`\``,
         },
       ],
     });
