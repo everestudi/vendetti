@@ -985,6 +985,132 @@ export const refetch_product_image = tool({
 });
 
 // ============================================================
+// Rita · TESTES Vendtef (workflows GH Actions isolados)
+// ============================================================
+// Pedido do Luís: validar TODOS os fluxos Vendtef antes de delegar
+// operação real. Rita é a "rata do sistema" — só ela executa.
+//
+// Leituras: read-only no Vendtef, não tocam DB. Dispatch direto.
+// Escritas: round-trip que volta ao estado original (ex: +R\$0.01 → rollback).
+
+export const rita_vendtef_test_login = tool({
+  description:
+    'Rita only: dispara workflow GH `vendtef-test-login` pra validar credenciais Vendtef + login pelo Playwright. Read-only, ~30s. Use pra confirmar que login funciona antes de outros testes.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const r = await dispatchWorkflow('vendtef-test-login', { triggeredBy: 'rita-test' });
+    if (!r.ok) return { from: 'Rita · Test', error: r.error };
+    return {
+      from: 'Rita · Test',
+      ok: true,
+      test: 'login',
+      note: 'Workflow disparado. Result em GH Actions (~30s). Verificar via gh run list ou aguardar próximo wakeup.',
+      next: 'Pra ver resultado, pode chamar zelda_token_audit ou aguardar Mara reportar.',
+    };
+  },
+});
+
+export const rita_vendtef_test_inventory = tool({
+  description:
+    'Rita only: dispara workflow GH `vendtef-test-inventory` pra ler inventário do Vendtef (slots + qty). Read-only, ~1min. Não toca DB.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const r = await dispatchWorkflow('vendtef-test-inventory', { triggeredBy: 'rita-test' });
+    if (!r.ok) return { from: 'Rita · Test', error: r.error };
+    return {
+      from: 'Rita · Test',
+      ok: true,
+      test: 'inventory',
+      note: 'Workflow disparado. ~1min pra rodar. Verificar artifacts/logs em GH Actions.',
+    };
+  },
+});
+
+export const rita_vendtef_test_sales = tool({
+  description:
+    'Rita only: dispara workflow GH `vendtef-test-sales` pra ler relatório de vendas Vendtef. Read-only, ~1-2min.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const r = await dispatchWorkflow('vendtef-test-sales', { triggeredBy: 'rita-test' });
+    if (!r.ok) return { from: 'Rita · Test', error: r.error };
+    return {
+      from: 'Rita · Test',
+      ok: true,
+      test: 'sales',
+      note: 'Workflow disparado. ~1-2min pra rodar.',
+    };
+  },
+});
+
+export const rita_vendtef_test_explore = tool({
+  description:
+    'Rita only: dispara workflow GH `vendtef-test-explore` pra mapear rotas/menus do Vendtef. Read-only, ~2min. Use pra discovery de funcionalidades novas.',
+  inputSchema: z.object({}),
+  execute: async () => {
+    const r = await dispatchWorkflow('vendtef-test-explore', { triggeredBy: 'rita-test' });
+    if (!r.ok) return { from: 'Rita · Test', error: r.error };
+    return {
+      from: 'Rita · Test',
+      ok: true,
+      test: 'explore',
+      note: 'Workflow disparado. ~2min pra rodar.',
+    };
+  },
+});
+
+export const rita_vendtef_test_slot_update = tool({
+  description:
+    'Rita only: TESTE DE ESCRITA REAL no Vendtef (Luís autorizou). Dispara workflow round-trip: lê preço atual do slot → sobe +R\\$0,01 → sleep 30s → volta pro valor original. Valida fluxo update-slot completo sem deixar mudança permanente. Requer Decision AWAITING_HUMAN antes (regra Rita) — Luís confirma via /chat OU /decisions.',
+  inputSchema: z.object({
+    selecao: z.string().min(1).describe('Número da seleção a testar, ex: "13"'),
+    rationale: z
+      .string()
+      .default('Teste de validação do fluxo update-slot — round-trip +R\\$0,01.')
+      .describe('Motivo do teste pra audit'),
+  }),
+  execute: async ({ selecao, rationale }) => {
+    // Cria Decision AWAITING_HUMAN pro Luís aprovar
+    const slot = await prisma.slot.findFirst({ where: { position: selecao }, include: { sku: true } });
+    if (!slot) return { from: 'Rita · Test', error: `slot ${selecao} não encontrado` };
+    if (!slot.price) return { from: 'Rita · Test', error: `slot ${selecao} sem preço cadastrado` };
+
+    const originalPrice = Number(slot.price);
+    const testPrice = Number((originalPrice + 0.01).toFixed(2));
+
+    const dec = await prisma.decision.create({
+      data: {
+        kind: 'PRICE_CHANGE',
+        level: 'YELLOW',
+        summary: `🧪 TESTE round-trip Vendtef slot ${selecao}: R\$${originalPrice.toFixed(2)} → R\$${testPrice.toFixed(2)} → R\$${originalPrice.toFixed(2)}`,
+        rationale,
+        data: {
+          testType: 'vendtef-slot-update-roundtrip',
+          selecao,
+          originalPrice,
+          testPrice,
+          rollback: true,
+          dispatchType: 'vendtef-test-slot-update',
+          dispatchPayload: { selecao },
+        } as never,
+        status: 'PENDING',
+      },
+    });
+
+    return {
+      from: 'Rita · Test',
+      ok: true,
+      decisionId: dec.id,
+      slot: selecao,
+      product: slot.sku?.name ?? null,
+      originalPrice,
+      testPrice,
+      note: `Decision ${dec.id.slice(-6)} criada PENDING. Luís aprova em /decisions OU via comentário no /chat. Quando aprovada, workflow GH dispara automático (precisa hook — TODO) OU Luís dispara manual via gh workflow run vendtef-test-slot-update.yml -f selecao=${selecao}.`,
+      next: 'Luís aprova → workflow GH roda → ~15min round-trip completo → próximo mara_sync vai mostrar preço de volta no original',
+    };
+  },
+});
+
+// ============================================================
 // Augusto · canal único humano (WhatsApp + thread)
 // ============================================================
 
@@ -1317,4 +1443,9 @@ export const VENDETTI_TOOLS = {
   gabi_recent_runs,
   gabi_create_github_issue,
   augusto_notify_luis,
+  rita_vendtef_test_login,
+  rita_vendtef_test_inventory,
+  rita_vendtef_test_sales,
+  rita_vendtef_test_explore,
+  rita_vendtef_test_slot_update,
 } as const;

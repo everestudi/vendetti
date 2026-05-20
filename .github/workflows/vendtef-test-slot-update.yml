@@ -1,0 +1,114 @@
+name: Vendtef test slot-update (WRITE — round-trip)
+
+# Testa fluxo de UPDATE no Vendtef sem deixar valor diferente.
+# Estratégia round-trip:
+#   1. Lê preço atual do slot via inventory rápido
+#   2. Sobe +R$0,01 com --commit
+#   3. sleep 30s pra Vendtef persistir + Mara conseguir capturar
+#   4. Volta pro preço original com --commit
+#   5. Reporta diff dos 3 passos
+#
+# Dispatch via repository_dispatch type vendtef-test-slot-update com
+# client_payload { selecao: "13" }.
+
+on:
+  workflow_dispatch:
+    inputs:
+      selecao:
+        description: 'Número da seleção (ex: 13)'
+        required: true
+        type: string
+  repository_dispatch:
+    types: [vendtef-test-slot-update]
+
+jobs:
+  slot-update-roundtrip:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install deps
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Determine selecao
+        id: sel
+        run: |
+          # Pega de inputs (workflow_dispatch) OU client_payload (repository_dispatch)
+          SELECAO="${{ github.event.inputs.selecao }}${{ github.event.client_payload.selecao }}"
+          if [ -z "$SELECAO" ]; then
+            echo "::error::selecao é obrigatória"
+            exit 1
+          fi
+          echo "selecao=$SELECAO" >> $GITHUB_OUTPUT
+          echo "Testing slot: $SELECAO"
+
+      - name: Read current price from DB
+        id: orig
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          PRICE=$(npx tsx -e "
+            import { prisma } from './src/lib/db';
+            (async () => {
+              const s = await prisma.slot.findFirst({ where: { position: '${{ steps.sel.outputs.selecao }}' } });
+              if (!s || !s.price) { process.stderr.write('slot não tem preço'); process.exit(1); }
+              process.stdout.write(String(s.price));
+              await prisma.\$disconnect();
+            })();
+          " 2>&1)
+          if [ -z "$PRICE" ]; then
+            echo "::error::não consegui ler preço original do slot ${{ steps.sel.outputs.selecao }}"
+            exit 1
+          fi
+          echo "original_price=$PRICE" >> $GITHUB_OUTPUT
+          # +0.01
+          UP=$(node -e "console.log((Number('$PRICE') + 0.01).toFixed(2))")
+          echo "up_price=$UP" >> $GITHUB_OUTPUT
+          echo "Original: R\$ $PRICE → Test up: R\$ $UP → Rollback R\$ $PRICE"
+
+      - name: STEP 1 — UP +R$0,01
+        env:
+          HEADLESS: 'true'
+        run: |
+          npx tsx src/scrapers/vendtef/update-slot.ts \
+            --selecao ${{ steps.sel.outputs.selecao }} \
+            --price ${{ steps.orig.outputs.up_price }} \
+            --commit
+
+      - name: Wait 30s for Vendtef persist
+        run: sleep 30
+
+      - name: STEP 2 — ROLLBACK to original
+        env:
+          HEADLESS: 'true'
+        run: |
+          npx tsx src/scrapers/vendtef/update-slot.ts \
+            --selecao ${{ steps.sel.outputs.selecao }} \
+            --price ${{ steps.orig.outputs.original_price }} \
+            --commit
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "=== Test slot-update round-trip ==="
+          echo "Slot: ${{ steps.sel.outputs.selecao }}"
+          echo "Original: R\$ ${{ steps.orig.outputs.original_price }}"
+          echo "Test up:  R\$ ${{ steps.orig.outputs.up_price }}"
+          echo "Rollback: R\$ ${{ steps.orig.outputs.original_price }}"
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendtef-test-slot-update-${{ github.run_id }}
+          path: tmp/
+          retention-days: 7
+          if-no-files-found: ignore

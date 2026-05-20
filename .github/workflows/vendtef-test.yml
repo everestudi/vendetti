@@ -1,0 +1,80 @@
+name: Vendtef test (read-only)
+
+# Roda scrapers Vendtef como teste isolado — cirúrgico, ~30s-2min cada.
+# Não toca DB (só lê Vendtef + imprime stdout).
+#
+# Dispatch types:
+#   - vendtef-test-login    → scrape:login (~30s)
+#   - vendtef-test-inventory → scrape:inventory (~1min)
+#   - vendtef-test-sales    → scrape:sales (~1-2min)
+#   - vendtef-test-explore  → scrape:explore (~2min, mapeia rotas)
+#
+# Triggered via dispatchWorkflow('vendtef-test-*') do agent runtime.
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types:
+      - vendtef-test-login
+      - vendtef-test-inventory
+      - vendtef-test-sales
+      - vendtef-test-explore
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install deps
+        run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Determine test type
+        id: t
+        run: |
+          # repository_dispatch usa github.event.action; workflow_dispatch usa input ou default
+          ACTION="${{ github.event.action }}"
+          if [ -z "$ACTION" ]; then ACTION="vendtef-test-login"; fi
+          echo "test=${ACTION#vendtef-test-}" >> $GITHUB_OUTPUT
+          echo "Running test: ${ACTION#vendtef-test-}"
+
+      - name: Run login test
+        if: steps.t.outputs.test == 'login'
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/scrapers/vendtef/login.ts
+
+      - name: Run inventory test
+        if: steps.t.outputs.test == 'inventory'
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/scrapers/vendtef/inventory.ts
+
+      - name: Run sales test
+        if: steps.t.outputs.test == 'sales'
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/scrapers/vendtef/sales.ts
+
+      - name: Run explore test
+        if: steps.t.outputs.test == 'explore'
+        env:
+          HEADLESS: 'true'
+        run: npx tsx src/scrapers/vendtef/explore.ts
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendtef-test-${{ steps.t.outputs.test }}-${{ github.run_id }}
+          path: tmp/
+          retention-days: 3
+          if-no-files-found: ignore

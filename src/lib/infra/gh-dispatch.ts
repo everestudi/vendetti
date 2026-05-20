@@ -13,7 +13,13 @@ export type WorkflowEventType =
   | 'mara-sync'
   | 'vendtef-sync'
   | 'vendtef-abastecimento'
-  | 'sac-cleanup';
+  | 'sac-cleanup'
+  // Testes Vendtef via Augusto/Rita (mapeamento solicitado pelo Luís)
+  | 'vendtef-test-login'
+  | 'vendtef-test-inventory'
+  | 'vendtef-test-sales'
+  | 'vendtef-test-explore'
+  | 'vendtef-test-slot-update';
 
 export interface DispatchResult {
   ok: boolean;
