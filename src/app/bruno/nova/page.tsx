@@ -18,6 +18,13 @@ interface ParsedItem {
   totalCost: number;
   originalUnitCost?: number;
   skuMatch?: SkuMatch;
+  /** Sugestão extra de IA com web search — quando F1 falhou (ex: "Powerade Azul" → "Mountain Blast") */
+  aiSuggestion?: {
+    interpretedName: string;
+    skuMatch?: { id: string; code: string; name: string; score: number };
+    reasoning: string;
+    confidence: number;
+  };
 }
 interface ParsedDoc {
   supplier: 'ATACADAO' | 'VITTAL' | 'OUTRO';
@@ -321,6 +328,41 @@ function NovaCompraInner() {
                       <SkuLinker item={it} onChange={(patch) => updateItem(i, patch)} />
                     </div>
                   </div>
+
+                  {/* 🤖 Sugestão IA com web search (quando F1 falhou) */}
+                  {it.aiSuggestion && !it.manualSku && (
+                    <div className="mt-2 rounded border border-amber-300 bg-amber-50/60 p-2 text-xs">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <strong className="text-amber-900">
+                          🤖 IA pesquisou ({it.aiSuggestion.confidence}%):{' '}
+                          <span className="font-normal">{it.aiSuggestion.interpretedName}</span>
+                        </strong>
+                        {it.aiSuggestion.skuMatch && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              // Busca o SKU completo via API pra preencher os dados (category, cost, price)
+                              const skuId = it.aiSuggestion!.skuMatch!.id;
+                              fetch(`/api/bruno-nfe/sku-search?q=${encodeURIComponent(it.aiSuggestion!.skuMatch!.name)}`)
+                                .then((r) => r.json())
+                                .then((j) => {
+                                  const full = (j.results ?? []).find((s: { id: string }) => s.id === skuId);
+                                  if (full) {
+                                    updateItem(i, { action: 'match', manualSku: full });
+                                  }
+                                });
+                            }}
+                            className="rounded bg-amber-600 px-2 py-0.5 text-[10px] font-semibold text-white hover:bg-amber-700"
+                          >
+                            ✓ Usar "{it.aiSuggestion.skuMatch.name}" ({it.aiSuggestion.skuMatch.score}%)
+                          </button>
+                        )}
+                      </div>
+                      <p className="mt-1 text-[11px] text-amber-900/75">
+                        {it.aiSuggestion.reasoning}
+                      </p>
+                    </div>
+                  )}
                 </li>
               ))}
             </ul>

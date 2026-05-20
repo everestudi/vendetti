@@ -27,6 +27,19 @@ export interface NfeParsedItem {
     name: string;
     score: number; // 0-100
   };
+  /// Sugestão extra de IA com web search pesquisando o produto.
+  /// Populado quando skuMatch.score é baixo OU ausente. Ajuda em
+  /// casos como "powerade azul" → "Mountain Blast".
+  aiSuggestion?: {
+    /// Nome interpretado pelo LLM (ex: "Powerade Mountain Blast 500ml")
+    interpretedName: string;
+    /// Match com SKU existente baseado no nome interpretado, se houver
+    skuMatch?: { id: string; code: string; name: string; score: number };
+    /// Resumo da pesquisa (1-2 linhas) — fonte mencionada se houver
+    reasoning: string;
+    /// Modelo retornou confidence própria
+    confidence: number;
+  };
 }
 
 export interface NfeParsedDoc {

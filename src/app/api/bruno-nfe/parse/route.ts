@@ -6,6 +6,7 @@
 
 import { NextResponse } from 'next/server';
 import { parseNfeFromBase64 } from '@/lib/vendetti/nfe-parse';
+import { enrichLowConfidenceItems } from '@/lib/vendetti/nfe-enrich';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -41,6 +42,20 @@ export async function POST(req: Request) {
   const base64 = buf.toString('base64');
   try {
     const parsed = await parseNfeFromBase64(base64, mediaType);
+    // 🤖 Enriquece items low-confidence com IA + web search (LLM busca na
+    // web pra desambiguar "Powerade Azul" → "Mountain Blast" etc).
+    // Best-effort: se falhar, items seguem só com F1 match normal.
+    if (parsed.items.length > 0) {
+      const enrichResult = await enrichLowConfidenceItems(parsed.items, { max: 5 }).catch((e) => {
+        console.warn('[enrich] falhou:', e instanceof Error ? e.message : e);
+        return null;
+      });
+      if (enrichResult) {
+        console.log(
+          `[nfe-parse] enriched ${enrichResult.enriched} items · ${enrichResult.matched} acharam SKU via interpretação IA`,
+        );
+      }
+    }
     return NextResponse.json({ ok: true, parsed });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
