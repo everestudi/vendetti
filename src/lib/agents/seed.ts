@@ -85,6 +85,18 @@ markdown estruturado pra simular efeitos. As tools internas SEMPRE disponíveis:
 Além dessas, você tem tools específicas da sua função (mara_summary, bruno_search_atacadao,
 decision_create, etc) listadas nas tools disponíveis. Use livre quando precisar.
 
+## 🔎 web_search — quando você tem a tool
+
+Se a tool **web_search** estiver listada nas suas tools, USE pra resolver
+ambiguidades de produto/marca/preço **antes** de pedir ajuda humana. Exemplos:
+- "Power ADE azul" → pesquisa "Powerade sabor azul" → descobre Mountain Blast
+- "Red Bull Amora" → confirma se é Frutas Vermelhas (Sugar Free) ou outra variante
+- Preço de referência de um SKU novo → busca no Atacadão / Amazon
+- Notícia/fato pontual relevante pra decisão
+
+Limite: 5 buscas por turno. Resultados vêm direto da Anthropic, não consomem
+suas tools custom. Cite a fonte no seu raciocínio ("segundo Google: ...").
+
 ## Output em texto
 
 O TEXTO que você escreve (fora das tool calls) é a **resposta direta pro contexto
@@ -325,6 +337,7 @@ Quando ele disser "Augusto, você é CEO agora", o Luís vai desligar seu \`huma
       'mara_force_sync', 'decision_create', 'zelda_check_proposal',
       'gabi_recent_runs', // Augusto pode ler runs dos outros agentes pra sintetizar briefing
       'augusto_notify_luis', // Canal WhatsApp pro Luís (urgência + briefing matinal)
+      'web_search', // Pesquisa Google nativa Anthropic — checar fatos, produtos novos
     ],
   },
 
@@ -612,6 +625,9 @@ Pra slot_update, processo é diferente:
       'rita_vendtef_test_sales',
       'rita_vendtef_test_explore',
       'rita_vendtef_test_slot_update', // este cria Decision AWAITING_HUMAN
+      // Pesquisa Google — resolve "Power ADE azul = Mountain Blast" sozinha
+      // ao invés de mandar pra human_review.
+      'web_search',
     ],
   },
 

@@ -100,7 +100,25 @@ export async function GET(req: Request) {
     };
   });
 
-  return NextResponse.json({ ok: true, messages });
+  // === "Está digitando…" — detecta runs ATIVOS do Augusto ===
+  // RUNNING ou CLAIMED nos últimos 2min. UI mostra indicador WhatsApp-like.
+  const recentRun = await prisma.agentRun.findFirst({
+    where: {
+      agent: { slug: 'augusto' },
+      status: { in: ['RUNNING'] },
+      startedAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+    },
+    orderBy: { startedAt: 'desc' },
+    select: { id: true, startedAt: true, trigger: true },
+  });
+  const isTyping = Boolean(recentRun);
+
+  return NextResponse.json({
+    ok: true,
+    messages,
+    isTyping,
+    typingSince: recentRun?.startedAt.toISOString() ?? null,
+  });
 }
 
 export async function DELETE(req: Request) {

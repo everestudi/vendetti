@@ -432,13 +432,27 @@ async function callAnthropicWithLoop(
           cache_control: { type: 'ephemeral' as const },
         },
       ],
-      tools: tools.length > 0
-        ? (tools.map((t) => ({
-            name: t.name,
-            description: t.description,
-            input_schema: t.input_schema as never,
-          })) as never)
-        : undefined,
+      tools: (() => {
+        const customTools = tools.map((t) => ({
+          name: t.name,
+          description: t.description,
+          input_schema: t.input_schema as never,
+        }));
+        // === Anthropic server-side tools (executadas pelo próprio Anthropic) ===
+        // web_search: agente pesquisa Google. Útil pra Rita resolver "Power ADE azul
+        // = Mountain Blast" sozinha, Augusto checar fatos, Bruno cruzar produtos.
+        // Habilitado via toolsAllowed contendo 'web_search'.
+        const serverTools: unknown[] = [];
+        if (agent.toolsAllowed.includes('web_search')) {
+          serverTools.push({
+            type: 'web_search_20250305',
+            name: 'web_search',
+            max_uses: 5, // limita por turno pra evitar loop infinito + custo
+          });
+        }
+        const all = [...customTools, ...serverTools];
+        return all.length > 0 ? (all as never) : undefined;
+      })(),
       messages,
     });
 
@@ -469,8 +483,27 @@ async function callAnthropicWithLoop(
       break;
     }
 
-    // Executa cada tool_use, coleta resultados, monta tool_result block
+    // Executa cada tool_use, coleta resultados, monta tool_result block.
+    // Filtra só client-side custom tools (type='tool_use'). Server-side tools
+    // como web_search aparecem como type='server_tool_use' e já foram
+    // executadas pelo Anthropic — o resultado já tá no response.content.
     const toolUses = response.content.filter((b): b is ToolUseBlock => b.type === 'tool_use');
+    // Se stop_reason='tool_use' mas só houve server tools (web_search), nada a
+    // executar do nosso lado — sai do loop pra o Anthropic continuar gerando.
+    // Mas isso só é seguro se o response.content tem server_tool_use ou
+    // _result blocks; senão é loop infinito. Defensive: se zero custom tools,
+    // pede pro modelo continuar com tool_results vazios e segue.
+    if (toolUses.length === 0) {
+      // Provavelmente só server tools (web_search) — o response.content já
+      // contém web_search_tool_result; o modelo precisa de mais uma rodada
+      // pra sintetizar a resposta. Mas SEM nosso tool_result o Anthropic
+      // não aceita. Solução: pergunta direta novamente como user prompt.
+      messages.push({
+        role: 'user',
+        content: 'continue com base no resultado da pesquisa acima.',
+      });
+      continue;
+    }
     const toolResults: Array<{
       type: 'tool_result';
       tool_use_id: string;
