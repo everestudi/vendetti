@@ -9,7 +9,7 @@
 
 import Link from 'next/link';
 import { MonthlyRevenuePoint, AgentPending, SyncStatus, DailyComparisonPoint, AugustoCommentary } from '@/lib/dashboard';
-import { forceMaraSync, refreshProductImages, refetchAllProductImages } from '@/app/actions';
+import { forceMaraSync } from '@/app/actions';
 import { RevenueCharts } from './RevenueCharts';
 import { SubmitButton } from './SubmitButton';
 
@@ -90,35 +90,15 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
       <section className="mb-8 rounded-2xl border-2 border-navy/15 bg-white p-6 shadow-sm">
         <header className="mb-4 flex flex-wrap items-baseline justify-between gap-2">
           <h2 className="text-xl font-bold text-navy">💰 Faturamento</h2>
-          <div className="flex gap-2">
-            <form action={refreshProductImages}>
-              <SubmitButton
-                pendingText="Buscando..."
-                className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
-                title="Busca imagens só pros SKUs sem imagem (Atacadão → Claude). ~30s-1min"
-              >
-                🖼️ Imagens
-              </SubmitButton>
-            </form>
-            <form action={refetchAllProductImages}>
-              <SubmitButton
-                pendingText="Re-buscando..."
-                className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
-                title="Re-busca TODAS as imagens — pra corrigir matches errados. Pode levar 2-3min."
-              >
-                🔁 Re-buscar
-              </SubmitButton>
-            </form>
-            <form action={forceMaraSync}>
-              <SubmitButton
-                pendingText="Disparando..."
-                className="rounded-lg bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-900"
-                title="Dispara mara-sync no GH Actions · ~3-5min depois"
-              >
-                🔄 Sincronizar agora
-              </SubmitButton>
-            </form>
-          </div>
+          <form action={forceMaraSync}>
+            <SubmitButton
+              pendingText="Disparando..."
+              className="rounded-lg bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy-900"
+              title="Dispara mara-sync no GH Actions · ~3-5min depois"
+            >
+              🔄 Sincronizar agora
+            </SubmitButton>
+          </form>
         </header>
 
         {/* KPIs faturamento (4 cards) */}

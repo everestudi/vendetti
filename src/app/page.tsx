@@ -3,6 +3,7 @@ import { getLatestSnapshot } from '@/lib/vendetti/mara/analytics';
 import { getSlotsWithMargin } from '@/lib/vendetti/mara/slots-with-margin';
 import { VendingMachineLive } from '@/components/VendingMachineLive';
 import { HomeDashboard } from '@/components/HomeDashboard';
+import { SubmitButton } from '@/components/SubmitButton';
 import {
   getMonthlyRevenueSeries,
   getSyncStatus,
@@ -10,6 +11,7 @@ import {
   getDailyRevenueComparison,
   getAugustoCommentary,
 } from '@/lib/dashboard';
+import { refreshProductImages, refetchAllProductImages } from '@/app/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -69,12 +71,34 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
 
       {/* MÁQUINA INTERATIVA — visão ao vivo dos slots com badge Everest */}
       <section className="mt-10 rounded-2xl border border-navy/10 bg-gradient-to-br from-navy-50 to-white p-6">
-        <header className="mb-4">
-          <h2 className="text-2xl font-bold text-navy">A máquina, ao vivo</h2>
-          <p className="text-sm text-navy/60">
-            Passe o mouse num slot pra ver detalhes (incluindo saldo Everest pra reabastecer) · clique pra
-            abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
-          </p>
+        <header className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-2xl font-bold text-navy">A máquina, ao vivo</h2>
+            <p className="text-sm text-navy/60">
+              Passe o mouse num slot pra ver detalhes (incluindo saldo Everest pra reabastecer) · clique pra
+              abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <form action={refreshProductImages}>
+              <SubmitButton
+                pendingText="Buscando..."
+                className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
+                title="Busca imagens só pros SKUs sem imagem (Atacadão → Claude). ~30s-1min"
+              >
+                🖼️ Atualizar imagens vending
+              </SubmitButton>
+            </form>
+            <form action={refetchAllProductImages}>
+              <SubmitButton
+                pendingText="Re-buscando..."
+                className="rounded-lg border border-navy/20 bg-white px-3 py-1.5 text-xs font-semibold text-navy/70 hover:bg-navy/5"
+                title="Re-busca TODAS as imagens — pra corrigir matches errados. Pode levar 2-3min."
+              >
+                🔁 Re-buscar todas
+              </SubmitButton>
+            </form>
+          </div>
         </header>
 
         <VendingMachineLive slots={slots} capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} />
