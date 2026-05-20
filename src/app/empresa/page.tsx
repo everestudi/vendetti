@@ -17,12 +17,13 @@ import { prisma } from '@/lib/db';
 import { EmpresaFeed } from '@/components/EmpresaFeed';
 import { PanicButton } from '@/components/PanicButton';
 import { ChatVendetti } from '@/components/ChatVendetti';
+import { PendingApprovals } from '@/components/PendingApprovals';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 10;
 
 export default async function EmpresaPage() {
-  const [agents, recentMessages, recentRuns, totalSpent] = await Promise.all([
+  const [agents, recentMessages, recentRuns, totalSpent, pendingApprovalMsgs, pendingDecisions] = await Promise.all([
     prisma.agent.findMany({
       where: { active: true },
       orderBy: { slug: 'asc' },
@@ -46,6 +47,26 @@ export default async function EmpresaPage() {
     prisma.agent.aggregate({
       where: { active: true },
       _sum: { spentUsdMonth: true, budgetUsdMonth: true },
+    }),
+    // Mensagens PROPOSAL/REQUEST/QUESTION direcionadas a Luís (broadcast com fromAgent
+    // ou direcionadas pro humano) e ainda não actioned/dismissed
+    prisma.agentMessage.findMany({
+      where: {
+        kind: { in: ['PROPOSAL', 'REQUEST', 'QUESTION'] },
+        status: { in: ['DELIVERED', 'READ'] },
+        toAgentId: null, // broadcast — Luís vê
+        fromAgentId: { not: null }, // vem de agente, não do próprio Luís
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 20,
+      include: { fromAgent: { select: { slug: true, name: true, emoji: true } } },
+    }),
+    // Decisions PENDING
+    prisma.decision.findMany({
+      where: { status: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+      take: 10,
+      select: { id: true, kind: true, level: true, summary: true, rationale: true, createdAt: true },
     }),
   ]);
 
@@ -122,6 +143,32 @@ export default async function EmpresaPage() {
           )}
         </div>
       </header>
+
+      {/* PENDENTES DE APROVAÇÃO — aparece destacado entre header e grid */}
+      {(pendingApprovalMsgs.length > 0 || pendingDecisions.length > 0) && (
+        <div className="mb-6">
+          <PendingApprovals
+            pendingMessages={pendingApprovalMsgs.map((m) => ({
+              id: m.id,
+              fromSlug: m.fromAgent?.slug ?? 'unknown',
+              fromName: m.fromAgent?.name ?? 'Agente desconhecido',
+              fromEmoji: m.fromAgent?.emoji ?? '🤖',
+              kind: m.kind,
+              body: m.body,
+              createdAt: m.createdAt.toISOString(),
+              threadId: m.threadId,
+            }))}
+            pendingDecisions={pendingDecisions.map((d) => ({
+              id: d.id,
+              kind: d.kind,
+              level: d.level,
+              summary: d.summary,
+              rationale: d.rationale,
+              createdAt: d.createdAt.toISOString(),
+            }))}
+          />
+        </div>
+      )}
 
       <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
         {/* Sidebar agentes */}
