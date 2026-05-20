@@ -139,7 +139,7 @@ export default async function MonitorPage() {
 
         {events.length === 0 && (
           <div className="rounded-lg border border-dashed border-navy/20 p-12 text-center text-sm text-navy/45">
-            ainda sem eventos. comece pelo <Link href="/chat" className="underline">chat</Link> ou rode <code>npm run mara:sync</code>
+            ainda sem eventos. comece pelo <Link href="/empresa" className="underline">/empresa</Link> ou rode <code>npm run mara:sync</code>
           </div>
         )}
 

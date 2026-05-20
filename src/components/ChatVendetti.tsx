@@ -22,6 +22,8 @@ interface Props {
   heightClass?: string;
   /** se true, esconde o header (avatar+nome) — útil quando o painel CEO já mostra o avatar acima */
   hideHeader?: boolean;
+  /** compact mode: layout enxuto pra embed em outras páginas (ex: /empresa) */
+  compact?: boolean;
 }
 
 interface MessagePart {
@@ -111,7 +113,7 @@ function Message({ msg }: { msg: ChatMessage }) {
   );
 }
 
-export function ChatVendetti({ heightClass, hideHeader }: Props) {
+export function ChatVendetti({ heightClass, hideHeader, compact }: Props) {
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [historyLoaded, setHistoryLoaded] = useState(false);
@@ -198,8 +200,20 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
     }
   }
 
+  // Default height: compact = altura fixa (embed), full = viewport menos header
+  const defaultHeight = compact ? 'h-[480px]' : 'h-[calc(100vh-3.5rem)]';
+
+  function onTextareaKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter = envia, Shift+Enter = nova linha. Padrão Slack/iMessage/ChatGPT.
+    if (e.key === 'Enter' && !e.shiftKey && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      const form = e.currentTarget.form;
+      if (form) form.requestSubmit();
+    }
+  }
+
   return (
-    <div className={`flex flex-col ${heightClass ?? 'h-[calc(100vh-3.5rem)]'}`}>
+    <div className={`flex flex-col ${heightClass ?? defaultHeight}`}>
       {!hideHeader && (
         <header className="mb-3 flex items-center gap-3 border-b border-navy/10 pb-3">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -270,18 +284,34 @@ export function ChatVendetti({ heightClass, hideHeader }: Props) {
         )}
       </div>
 
-      <form onSubmit={submit} className="mt-3 flex gap-2">
-        <input
+      <form onSubmit={submit} className="mt-3 flex items-end gap-2">
+        <textarea
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Pergunta pro Augusto..."
+          onKeyDown={onTextareaKeyDown}
+          placeholder="Pergunta pro Augusto... (Enter envia, Shift+Enter quebra linha)"
           disabled={sending}
-          className="flex-1 rounded-lg border border-navy/20 bg-white px-4 py-3 text-base focus:border-navy focus:outline-none disabled:opacity-50"
+          rows={1}
+          className="flex-1 resize-none rounded-lg border border-navy/20 bg-white px-4 py-3 text-base leading-snug focus:border-navy focus:outline-none disabled:opacity-50"
+          style={{
+            minHeight: '52px',
+            maxHeight: '180px',
+            // auto-resize via inline style — textarea cresce conforme digita
+            height: 'auto',
+          }}
+          // Auto-resize: ajusta height conforme conteúdo (cresce até maxHeight)
+          ref={(el) => {
+            if (el) {
+              el.style.height = 'auto';
+              el.style.height = Math.min(180, el.scrollHeight) + 'px';
+            }
+          }}
         />
         <button
           type="submit"
           disabled={!input.trim() || sending}
-          className="rounded-lg bg-navy px-5 py-3 font-semibold text-white hover:bg-navy-900 disabled:opacity-50"
+          className="shrink-0 rounded-lg bg-navy px-5 py-3 font-semibold text-white hover:bg-navy-900 disabled:opacity-50"
+          style={{ minHeight: '52px' }}
         >
           {sending ? '...' : '↑'}
         </button>

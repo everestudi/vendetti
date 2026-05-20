@@ -16,6 +16,7 @@ import Link from 'next/link';
 import { prisma } from '@/lib/db';
 import { EmpresaFeed } from '@/components/EmpresaFeed';
 import { PanicButton } from '@/components/PanicButton';
+import { ChatVendetti } from '@/components/ChatVendetti';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 10;
@@ -225,30 +226,44 @@ export default async function EmpresaPage() {
           </div>
         </aside>
 
-        {/* Feed principal */}
-        <section>
-          <header className="mb-3 flex items-baseline justify-between">
-            <h2 className="text-lg font-bold text-navy">💬 Feed da empresa</h2>
-            <span className="text-[11px] text-navy/45">
-              últimas {recentMessages.length} msgs · refresh a cada 10s
-            </span>
-          </header>
-          <EmpresaFeed
-            initialMessages={recentMessages.map((m) => ({
-              id: m.id,
-              fromSlug: m.fromAgent?.slug ?? null,
-              fromName: m.fromAgent?.name ?? 'Luís',
-              fromEmoji: m.fromAgent?.emoji ?? '👤',
-              toSlug: m.toAgent?.slug ?? null,
-              toName: m.toAgent?.name ?? 'broadcast',
-              toEmoji: m.toAgent?.emoji ?? '📢',
-              kind: m.kind,
-              body: m.body,
-              status: m.status,
-              createdAt: m.createdAt.toISOString(),
-              threadId: m.threadId,
-            }))}
-          />
+        {/* Coluna principal: Chat Augusto no topo, Feed embaixo */}
+        <section className="space-y-6">
+          {/* Chat com Augusto — embedded compact (480px) */}
+          <div className="rounded-2xl border-2 border-navy/15 bg-white p-4 shadow-sm">
+            <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+              <h2 className="text-lg font-bold text-navy">🎩 Augusto · CEO interim</h2>
+              <span className="text-[11px] text-navy/45">
+                fala direto · Enter envia · Shift+Enter quebra linha
+              </span>
+            </header>
+            <ChatVendetti compact hideHeader />
+          </div>
+
+          {/* Feed da empresa */}
+          <div>
+            <header className="mb-3 flex items-baseline justify-between">
+              <h2 className="text-lg font-bold text-navy">💬 Feed da empresa</h2>
+              <span className="text-[11px] text-navy/45">
+                últimas {recentMessages.length} msgs · refresh a cada 10s
+              </span>
+            </header>
+            <EmpresaFeed
+              initialMessages={recentMessages.map((m) => ({
+                id: m.id,
+                fromSlug: m.fromAgent?.slug ?? null,
+                fromName: m.fromAgent?.name ?? 'Luís',
+                fromEmoji: m.fromAgent?.emoji ?? '👤',
+                toSlug: m.toAgent?.slug ?? null,
+                toName: m.toAgent?.name ?? 'broadcast',
+                toEmoji: m.toAgent?.emoji ?? '📢',
+                kind: m.kind,
+                body: m.body,
+                status: m.status,
+                createdAt: m.createdAt.toISOString(),
+                threadId: m.threadId,
+              }))}
+            />
+          </div>
         </section>
       </div>
     </main>

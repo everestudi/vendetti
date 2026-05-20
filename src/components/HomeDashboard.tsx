@@ -214,7 +214,7 @@ export function HomeDashboard({ revenueSeries, dailyComparison, syncStatus, pend
           )}
           <p className="mt-3 text-[10px] text-navy/40">
             Briefing gerado por Claude Haiku · refresh a cada 5min de cache. Quer chat completo?{' '}
-            <Link href="/chat" className="underline hover:text-navy/70">/chat com Augusto →</Link>
+            <Link href="/empresa" className="underline hover:text-navy/70">Falar com Augusto na empresa →</Link>
           </p>
         </section>
       )}

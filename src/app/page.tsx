@@ -39,19 +39,34 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
           Vendetti · CEO da minha vending machine
         </h1>
         <p className="mt-1 text-sm text-navy/65">
-          6 agentes IA operando uma vending no Blue Mall Rondon ·{' '}
-          <Link href="/sobre" className="underline hover:text-navy">
-            sobre o projeto
-          </Link>{' '}
-          ·{' '}
-          <Link href="/evolucao" className="underline hover:text-navy">
-            evolução
-          </Link>{' '}
-          ·{' '}
-          <Link href="/equipe" className="underline hover:text-navy">
-            equipe
-          </Link>
+          7 agentes IA operando uma vending no Blue Mall Rondon
         </p>
+        <nav className="mt-3 flex flex-wrap gap-2">
+          <Link
+            href="/empresa"
+            className="rounded-lg bg-navy px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-navy-900"
+          >
+            🏢 Empresa · falar com Augusto →
+          </Link>
+          <Link
+            href="/mara"
+            className="rounded-lg border border-navy/20 bg-white px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50"
+          >
+            📊 Dashboard Mara
+          </Link>
+          <Link
+            href="/decisions"
+            className="rounded-lg border border-navy/20 bg-white px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50"
+          >
+            📋 Decisions
+          </Link>
+          <Link
+            href="/sobre"
+            className="rounded-lg border border-navy/10 bg-white/50 px-4 py-2 text-sm text-navy/70 hover:bg-navy-50"
+          >
+            sobre · evolução · equipe
+          </Link>
+        </nav>
       </header>
 
       {/* DASHBOARD OPERACIONAL — 3 seções: Faturamento · Augusto CEO · Pendências */}
@@ -72,21 +87,18 @@ export default async function Home({ searchParams }: { searchParams: Promise<{ s
           <p className="text-sm text-navy/60">
             Passe o mouse num slot pra ver detalhes (incluindo saldo Everest pra reabastecer) · clique pra
             abrir no <Link href="/mara" className="font-semibold text-navy underline">dashboard da Mara</Link>
-            {' '}· imagens erradas? <Link href="/chat" className="font-semibold text-navy underline">fala com Augusto</Link>
+            {' '}· imagens erradas? <Link href="/empresa" className="font-semibold text-navy underline">fala com Augusto</Link>
           </p>
         </header>
 
         <VendingMachineLive slots={slots} capacityPct={capacityPct} slotsCritical={critical} slotsTotal={total} />
 
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link href="/chat" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
-            Conversar com Augusto →
+          <Link href="/empresa" className="rounded bg-navy px-4 py-2 text-sm font-semibold text-white hover:bg-navy-900">
+            🏢 Empresa · Augusto + 6 agentes →
           </Link>
           <Link href="/mara" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
             Dashboard Mara →
-          </Link>
-          <Link href="/equipe/rita" className="rounded border border-navy/20 px-4 py-2 text-sm font-semibold text-navy hover:bg-navy-50">
-            Operações Rita →
           </Link>
         </div>
       </section>

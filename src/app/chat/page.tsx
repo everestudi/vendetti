@@ -1,9 +1,13 @@
-import { ChatVendetti } from '@/components/ChatVendetti';
+/**
+ * /chat — redireciona pra /empresa, onde o chat com Augusto vive embedded
+ * junto da sidebar de agentes + feed da empresa.
+ *
+ * Decisão de UX: 1 página só pra o Luís (humano) — sem pular entre /chat
+ * e /empresa pra ver Augusto + os outros. Tudo num lugar.
+ */
+
+import { redirect } from 'next/navigation';
 
 export default function ChatPage() {
-  return (
-    <main className="mx-auto max-w-3xl px-4 py-4">
-      <ChatVendetti />
-    </main>
-  );
+  redirect('/empresa');
 }
