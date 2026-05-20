@@ -788,6 +788,25 @@ export const rita_register_purchase = tool({
           data: { cost: newCost, supplier: it.supplier },
         });
         processed.push({ product: it.productName, action: 'UPDATED', cost: newCost, qty: it.qty });
+
+        // Trigger margin_below_threshold (SPEC #2): se novo custo derruba margem
+        // abaixo de 35% em algum slot que vende esse SKU, acorda Bruno.
+        try {
+          const price = Number(existing.price);
+          if (price > 0) {
+            const newMarginPct = ((price - newCost) / price) * 100;
+            if (newMarginPct < 35) {
+              const { fireDomainEvent } = await import('../agents/triggers');
+              await fireDomainEvent({
+                kind: 'margin_below_threshold',
+                skuCode: code,
+                marginPct: Number(newMarginPct.toFixed(1)),
+              });
+            }
+          }
+        } catch (e) {
+          console.warn('[rita_register_purchase] margin trigger falhou:', e instanceof Error ? e.message : e);
+        }
       } else {
         await prisma.sku.create({
           data: {

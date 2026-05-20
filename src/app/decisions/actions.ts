@@ -14,11 +14,31 @@ async function loadExecutor() {
 }
 
 export async function approveDecision(id: string) {
-  await prisma.decision.update({
+  const dec = await prisma.decision.update({
     where: { id },
     data: { status: 'APPROVED', approvedBy: 'admin' },
   });
   revalidatePath('/decisions');
+
+  // Trigger automático restock_approved (SPEC #2): se Decision foi de reposição,
+  // dispara wakeup pra Rita agendar Weverton.
+  if (dec.kind === 'RESTOCK_ORDER' || dec.kind === 'RESTOCK_TASK') {
+    try {
+      const { fireDomainEvent } = await import('@/lib/agents/triggers');
+      const data = (dec.data ?? {}) as Record<string, unknown>;
+      const items = Array.isArray(data.items) ? (data.items as Array<{ slotPosition?: string; slot?: string }>) : [];
+      const slots = items
+        .map((it) => it.slotPosition ?? it.slot ?? '')
+        .filter(Boolean) as string[];
+      await fireDomainEvent({
+        kind: 'restock_approved',
+        decisionId: id,
+        slots,
+      });
+    } catch (e) {
+      console.warn('[approveDecision] fireDomainEvent falhou:', e instanceof Error ? e.message : e);
+    }
+  }
 }
 
 export async function rejectDecision(formData: FormData) {
@@ -76,11 +96,29 @@ export async function executeDecisionAction(id: string) {
 }
 
 export async function confirmPhysical(id: string) {
-  await prisma.decision.update({
+  const dec = await prisma.decision.update({
     where: { id },
     data: { status: 'EXECUTED' },
   });
   revalidatePath('/decisions');
+
+  // Trigger automático restock_executed (SPEC #2): se Decision física de
+  // reposição foi confirmada, acorda Lúcia pra atualizar P&L (vendas voltam
+  // após restock).
+  if (dec.kind === 'RESTOCK_ORDER' || dec.kind === 'RESTOCK_TASK') {
+    try {
+      const { fireDomainEvent } = await import('@/lib/agents/triggers');
+      const data = (dec.data ?? {}) as Record<string, unknown>;
+      const totalUnits = typeof data.totalUnits === 'number' ? data.totalUnits : 0;
+      await fireDomainEvent({
+        kind: 'restock_executed',
+        reposicaoId: id, // usa decisionId como ref já que não temos reposicaoId aqui
+        totalUnits,
+      });
+    } catch (e) {
+      console.warn('[confirmPhysical] fireDomainEvent falhou:', e instanceof Error ? e.message : e);
+    }
+  }
 }
 
 /**

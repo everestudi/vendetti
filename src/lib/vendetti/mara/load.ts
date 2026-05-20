@@ -316,6 +316,38 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     }
   }
 
+  // Trigger sale_unmatched: detecta vendas recém-criadas SEM skuId (slot
+  // teve venda mas a Mara não conseguiu matchar produto → P&L distorcido).
+  // Dispara wakeup pra Rita verificar com Weverton OU acionar match_correction.
+  // Janela: últimas 24h pra não disparar pelas históricas antigas.
+  if (trxCreated > 0) {
+    try {
+      const { fireDomainEvent } = await import('../../agents/triggers');
+      const since = new Date(Date.now() - 24 * 3600 * 1000);
+      const unmatched = await prisma.transaction.findMany({
+        where: {
+          status: 'OK',
+          skuId: null,
+          occurredAt: { gte: since },
+        },
+        select: { id: true, slotPosition: true },
+        take: 50, // sanity cap
+      });
+      for (const tx of unmatched) {
+        await fireDomainEvent({
+          kind: 'sale_unmatched',
+          transactionId: tx.id,
+          slotPosition: tx.slotPosition ?? 'unknown',
+        });
+      }
+      if (unmatched.length > 0) {
+        console.log(`[mara/load] ${unmatched.length} sale_unmatched triggers disparados`);
+      }
+    } catch (e) {
+      console.warn('[mara/load] fireDomainEvent sale_unmatched falhou:', e instanceof Error ? e.message : e);
+    }
+  }
+
   return {
     machineId: machine.id,
     skusUpserted: skusCount,
