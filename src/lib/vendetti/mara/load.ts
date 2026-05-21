@@ -62,6 +62,16 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
     const price = brlToNumber(slot.precoBR);
     const margin = brlToNumber(slot.lucroEstimadoBR);
 
+    // Respeita manualOverrideAt — se Luís ajustou skuId manualmente
+    // (ex: aprovou Decision inventory com swap), NÃO sobrescreve skuId.
+    // Continua sincronizando capacity/price/margin/alertas — só o produto-do-slot
+    // fica travado até Luís ajustar no Vendtef e liberar.
+    const existing = await prisma.slot.findUnique({
+      where: { machineId_position: { machineId: machine.id, position: slot.selecao } },
+      select: { manualOverrideAt: true },
+    });
+    const respectOverride = existing?.manualOverrideAt != null;
+
     await prisma.slot.upsert({
       where: { machineId_position: { machineId: machine.id, position: slot.selecao } },
       create: {
@@ -76,7 +86,8 @@ export async function loadAll(data: ExtractResult): Promise<LoadResult> {
         qtdeCritico: slot.qtdeCritico,
       },
       update: {
-        skuId: sku?.id ?? undefined,
+        // skuId só atualiza se NÃO houver override manual
+        ...(respectOverride ? {} : { skuId: sku?.id ?? undefined }),
         capacity: slot.capacidade,
         price,
         marginEst: margin,

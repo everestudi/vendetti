@@ -95,6 +95,11 @@ model Slot {
   marginEst       Decimal? @db.Decimal(10, 2)
   qtdeAlerta      Int?
   qtdeCritico     Int?
+  /// Quando Luís muda manualmente o skuId (ex: aprovar Decision de inventário
+  /// com swap), marca timestamp aqui. mara_sync respeita: NÃO sobrescreve skuId
+  /// enquanto manualOverrideAt != null. Capacidade/preço continuam sincronizando.
+  /// Pra liberar override (depois de ajustar no Vendtef), seta de volta pra null.
+  manualOverrideAt DateTime?
   updatedAt       DateTime @updatedAt
 
   @@unique([machineId, position])

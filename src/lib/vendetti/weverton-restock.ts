@@ -355,18 +355,32 @@ export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: 
   // sequencial estava dando timeout >10s no botão "Executar".
   const allSlots = await prisma.slot.findMany({
     where: { machineId: machine.id },
-    select: { id: true, position: true },
+    select: { id: true, position: true, skuId: true },
   });
-  const slotByPos = new Map(allSlots.map((s) => [s.position, s.id]));
+  const slotByPos = new Map(allSlots.map((s) => [s.position, s]));
 
   const skipped: string[] = [];
   const updates: Array<Promise<unknown>> = [];
+  /// Pendências: slots onde mudamos skuId no banco mas Vendtef ainda tem outro
+  /// produto. Lista vai pra `data.pendingVendtefSwaps` pra UI mostrar alerta.
+  const pendingVendtefSwaps: Array<{
+    slotPosition: string;
+    fromSkuName: string | null;
+    toSkuName: string;
+  }> = [];
+
+  // Carrega map SKU id → name pra logs/pendências
+  const skus = await prisma.sku.findMany({ select: { id: true, name: true } });
+  const skuById = new Map(skus.map((s) => [s.id, s.name]));
 
   for (const itRaw of data.items) {
     const it = itRaw as {
       slotPosition: string;
       qty: number;
       skip?: boolean;
+      targetProduct?: string; // SKU ID OU nome (vem do formData updateDecisionItems)
+      aliasMatch?: { skuId: string; skuName: string } | null;
+      llmReview?: { recommendedAction?: string; targetSkuId?: string; targetSkuName?: string } | null;
     };
     if (it.skip) {
       skipped.push(`slot ${it.slotPosition} (skip=true)`);
@@ -376,15 +390,54 @@ export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: 
       skipped.push(`slot ${it.slotPosition} (qty inválida)`);
       continue;
     }
-    const slotId = slotByPos.get(it.slotPosition);
-    if (!slotId) {
+    const slot = slotByPos.get(it.slotPosition);
+    if (!slot) {
       skipped.push(`slot ${it.slotPosition} (não existe no banco)`);
       continue;
     }
+
+    // === Detecta se precisa trocar skuId no slot ===
+    // Prioridade: targetProduct (Luís editou) > aliasMatch > llmReview (product_swap)
+    let newSkuId: string | undefined;
+    if (it.targetProduct) {
+      // targetProduct vem como ID ou nome — resolve
+      const byId = skus.find((s) => s.id === it.targetProduct);
+      const byName = byId ?? skus.find((s) => s.name === it.targetProduct);
+      newSkuId = byName?.id;
+    }
+    if (!newSkuId && it.aliasMatch) {
+      newSkuId = it.aliasMatch.skuId;
+    }
+    if (
+      !newSkuId &&
+      it.llmReview?.recommendedAction === 'product_swap' &&
+      it.llmReview.targetSkuId
+    ) {
+      newSkuId = it.llmReview.targetSkuId;
+    }
+
+    const willSwap = newSkuId && newSkuId !== slot.skuId;
+    if (willSwap) {
+      pendingVendtefSwaps.push({
+        slotPosition: it.slotPosition,
+        fromSkuName: slot.skuId ? skuById.get(slot.skuId) ?? null : null,
+        toSkuName: skuById.get(newSkuId!) ?? newSkuId!,
+      });
+    }
+
     updates.push(
       prisma.slot.update({
-        where: { id: slotId },
-        data: { currentQty: it.qty },
+        where: { id: slot.id },
+        data: {
+          currentQty: it.qty,
+          ...(willSwap
+            ? {
+                skuId: newSkuId,
+                // Trava: mara_sync NÃO vai reverter enquanto manualOverrideAt setado
+                manualOverrideAt: new Date(),
+              }
+            : {}),
+        },
       }),
     );
   }
@@ -394,7 +447,20 @@ export async function applyInventorySnapshot(decisionId: string): Promise<{ ok: 
   await Promise.all(updates);
   const updated = updates.length;
 
-  const summary = `${updated} slot(s) atualizado(s)${skipped.length > 0 ? `, ${skipped.length} pulado(s)` : ''}.`;
+  // Salva pendências de Vendtef swap na Decision pra UI mostrar alerta + futuro scraper
+  if (pendingVendtefSwaps.length > 0) {
+    await prisma.decision.update({
+      where: { id: decisionId },
+      data: {
+        data: {
+          ...data,
+          pendingVendtefSwaps,
+        } as unknown as object,
+      },
+    });
+  }
+
+  const summary = `${updated} slot(s) atualizado(s)${skipped.length > 0 ? `, ${skipped.length} pulado(s)` : ''}${pendingVendtefSwaps.length > 0 ? `, ${pendingVendtefSwaps.length} swap(s) Vendtef pendente(s)` : ''}.`;
   console.log(`[applyInventorySnapshot] ${decisionId}: ${summary}`);
   if (skipped.length > 0) console.log(`[applyInventorySnapshot] skipped: ${skipped.join(', ')}`);
   // Após aplicar: aprendizado automático dos matches que rolaram
