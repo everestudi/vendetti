@@ -526,13 +526,8 @@ async function swapSlotProduct(
     const newPid = await page.locator('input[name="codigo"]').first().inputValue().catch(() => '');
     const swapResult = { ok: true as const, newPid: newPid || 'unknown', newLabel: optionMatch.label };
 
-    if (!swapResult.ok) {
-      writeFileSync(
-        `${OUT_DIR}/swap-${slotPosition}-fail.json`,
-        JSON.stringify(swapResult, null, 2),
-      );
-      return { ok: false, error: swapResult.reason };
-    }
+    // swapResult.ok é sempre true aqui (failures retornaram antes). Mantém só
+    // pra TS — guard rail defensivo se refator no futuro mudar isso.
     await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-set.png`, fullPage: true });
 
     // Submit do modal — botão "Editar" (sem Array.from)

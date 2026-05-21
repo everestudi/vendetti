@@ -156,13 +156,82 @@ interface WevertonItem {
   aliasMatch?: { skuId: string; skuName: string; aliasId: string } | null;
 }
 
-const LLM_ACTION_BADGE: Record<string, { cls: string; emoji: string; label: string }> = {
-  abastecer_only: { cls: 'bg-emerald-100 text-emerald-800', emoji: '✓', label: 'só abastecer' },
-  product_swap: { cls: 'bg-amber-100 text-amber-800', emoji: '🔄', label: 'trocar produto' },
-  slot_swap_with: { cls: 'bg-purple-100 text-purple-800', emoji: '↔️', label: 'slot invertido' },
-  create_new: { cls: 'bg-blue-100 text-blue-800', emoji: '🆕', label: 'cadastrar novo' },
-  human_review: { cls: 'bg-rose-100 text-rose-800', emoji: '🙋', label: 'precisa decisão' },
+/**
+ * Origem da sugestão de produto certo na tabela do Weverton.
+ * Compartilhado entre WevertonTable e a legenda fixa no topo.
+ */
+const SOURCE_BADGE: Record<string, { cls: string; emoji: string; label: string; explanation: string }> = {
+  alias: {
+    cls: 'bg-emerald-100 text-emerald-800',
+    emoji: '🎯',
+    label: 'alias salvo',
+    explanation: 'Você ensinou antes — match deterministic, sem custo de LLM.',
+  },
+  'llm-abast': {
+    cls: 'bg-blue-100 text-blue-800',
+    emoji: '🤖',
+    label: 'LLM confirmou',
+    explanation: 'Claude Haiku validou que o produto cadastrado bate. Só atualizar quantidade.',
+  },
+  'llm-swap': {
+    cls: 'bg-amber-100 text-amber-800',
+    emoji: '🔄',
+    label: 'LLM sugere troca',
+    explanation: 'Weverton mandou produto diferente do cadastrado. LLM sugere swap.',
+  },
+  'llm-slotswap': {
+    cls: 'bg-purple-100 text-purple-800',
+    emoji: '↔️',
+    label: 'slot invertido',
+    explanation: 'LLM detectou que Vendtef tá com slots invertidos vs físico. Vai trocar com outro slot.',
+  },
+  f1: {
+    cls: 'bg-emerald-50 text-emerald-700',
+    emoji: '✓',
+    label: 'match direto',
+    explanation: 'Nome do Weverton bate token-por-token com o cadastrado. Sem ambiguidade.',
+  },
+  human: {
+    cls: 'bg-rose-100 text-rose-800',
+    emoji: '🙋',
+    label: 'você decide',
+    explanation: 'Produto novo ou ambíguo demais. Escolha do catálogo ou cadastre.',
+  },
 };
+
+function LegendBadge({ source }: { source: keyof typeof SOURCE_BADGE }) {
+  const b = SOURCE_BADGE[source];
+  return (
+    <span className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold ${b.cls}`} title={b.explanation}>
+      <span>{b.emoji}</span>
+      <span className="uppercase tracking-wide">{b.label}</span>
+    </span>
+  );
+}
+
+/** Legenda fixa de ícones — pra Luís entender o que cada badge significa. */
+function WevertonLegend() {
+  const sources: Array<keyof typeof SOURCE_BADGE> = ['alias', 'llm-abast', 'llm-swap', 'llm-slotswap', 'f1', 'human'];
+  return (
+    <details className="my-2 rounded-lg border border-navy/15 bg-navy/[0.03] px-3 py-2 text-[11px]">
+      <summary className="cursor-pointer font-semibold text-navy/70">
+        ℹ️ Legenda dos ícones — clica pra expandir
+      </summary>
+      <ul className="mt-2 space-y-1.5">
+        {sources.map((s) => (
+          <li key={s} className="flex items-start gap-2">
+            <LegendBadge source={s} />
+            <span className="text-navy/70">{SOURCE_BADGE[s].explanation}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 border-t border-navy/10 pt-1.5 text-[10px] text-navy/55">
+        💡 Quando você troca o produto e aprova, o sistema <strong>aprende</strong> esse mapeamento (vira alias 🎯).
+        Próxima vez já reconhece automático.
+      </p>
+    </details>
+  );
+}
 
 function PendingCard({ d, skus, categories }: { d: Decision; skus: SkuLike[]; categories: string[] }) {
   const data = (d.data ?? {}) as { source?: string; items?: WevertonItem[]; mode?: 'inventory' | 'restock' };
@@ -307,15 +376,6 @@ function WevertonTable({
     return { skuId: '', label: '', source: 'human' };
   }
 
-  const SOURCE_BADGE: Record<string, { cls: string; emoji: string; label: string }> = {
-    alias: { cls: 'bg-emerald-100 text-emerald-800', emoji: '🎯', label: 'alias' },
-    'llm-abast': { cls: 'bg-blue-50 text-blue-800', emoji: '🤖', label: 'LLM' },
-    'llm-swap': { cls: 'bg-amber-100 text-amber-800', emoji: '🔄', label: 'troca' },
-    'llm-slotswap': { cls: 'bg-purple-100 text-purple-800', emoji: '↔️', label: 'inversão' },
-    f1: { cls: 'bg-emerald-50 text-emerald-700', emoji: '✓', label: 'OK' },
-    human: { cls: 'bg-rose-100 text-rose-800', emoji: '🙋', label: 'você decide' },
-  };
-
   const totalUnits = items.reduce((s, i) => s + (i.qty ?? 0), 0);
 
   return (
@@ -333,6 +393,8 @@ function WevertonTable({
           💾 Salvar mudanças
         </button>
       </div>
+
+      <WevertonLegend />
       <div className="overflow-x-auto rounded border border-navy/15 bg-white">
         <table className="w-full text-[11px]">
           <thead className="bg-navy/5 text-[10px] uppercase text-navy/55">
@@ -384,11 +446,11 @@ function WevertonTable({
                     />
                   </td>
                   <td className="px-2 py-1.5">
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-col gap-1">
                       <select
                         name={`target_${i}`}
                         defaultValue={suggestion.skuId}
-                        className="w-full max-w-[260px] rounded border border-navy/20 px-1 py-0.5 text-[11px]"
+                        className="w-full max-w-[280px] rounded border border-navy/20 px-1 py-0.5 text-[11px]"
                       >
                         <option value="">— sem troca (mantém atual) —</option>
                         {skusSorted.map((s) => (
@@ -396,8 +458,12 @@ function WevertonTable({
                         ))}
                       </select>
                       {badge && (
-                        <span className={`whitespace-nowrap rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${badge.cls}`} title={suggestion.label || badge.label}>
-                          {badge.emoji}
+                        <span
+                          className={`inline-flex w-fit items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold uppercase ${badge.cls}`}
+                          title={badge.explanation}
+                        >
+                          <span>{badge.emoji}</span>
+                          <span>{badge.label}</span>
                         </span>
                       )}
                     </div>
@@ -422,11 +488,6 @@ function WevertonTable({
           </tbody>
         </table>
       </div>
-      <p className="mt-2 text-[10px] text-navy/55">
-        ℹ️ <strong>Legenda</strong>: 🎯 alias salvo · 🤖 LLM sugere · ↔️ inversão de slot detectada · ✓ match direto · 🙋 você decide.
-        {' '}Quando você troca o produto e aprova, o sistema <strong>aprende</strong> esse mapeamento (alias) — próxima vez já reconhece sem perguntar.
-        {' '}Pra cadastrar produto novo, use o /settings ou me peça.
-      </p>
     </form>
   );
 }
