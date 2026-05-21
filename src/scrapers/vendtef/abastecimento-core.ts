@@ -357,62 +357,174 @@ async function swapSlotProduct(
     await page.goto(MASCARAS_URL, { waitUntil: 'domcontentloaded' });
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
     await dismissModals(page);
+    await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-01-mascaras.png`, fullPage: true }).catch(() => undefined);
 
     // Abre modal "Seleções" da máquina
     const row = page.locator(`tr:has-text("${TARGET_MACHINE}")`).first();
+    const rowVisible = await row.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (!rowVisible) {
+      // dump pra debug
+      const html = (await page.content()).slice(0, 5000);
+      writeFileSync(`${OUT_DIR}/swap-${slotPosition}-no-row.html`, html);
+      return { ok: false, error: `Row "${TARGET_MACHINE}" não encontrado em /mascaras` };
+    }
     await row.locator('a.aSelecoes').click({ force: true });
+    await page.waitForTimeout(2_000);
+    await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-02-selecoes-open.png`, fullPage: true }).catch(() => undefined);
+
+    // Salva HTML completo do modal pra inspecionar estrutura quando debug
+    try {
+      const modalHtml = await page.locator('.modal.in, .modal.show').first().innerHTML({ timeout: 3_000 });
+      writeFileSync(`${OUT_DIR}/swap-${slotPosition}-modal.html`, modalHtml);
+    } catch (e) {
+      writeFileSync(`${OUT_DIR}/swap-${slotPosition}-modal-err.txt`, String(e));
+    }
+
+    // Clica ✏️ da seleção alvo via CSS selector + Playwright text matcher.
+    // Usa :has-text que mapeia direto pra CSS no DevTools protocol, sem usar
+    // utility script JS (que estava dando Array.from(undefined) bug).
+    // ATENÇÃO: tr:has-text matcheia substrings, então slot "1" matchearia
+    // "10", "11"... etc. Usamos `:text-is()` (exact match) na primeira coluna.
+    const targetRow = page
+      .locator('.modal.in tbody tr, .modal.show tbody tr')
+      .filter({ has: page.locator('td').nth(0).getByText(slotPosition, { exact: true }) });
+    const targetRowVisible = await targetRow.first().isVisible({ timeout: 5_000 }).catch(() => false);
+    if (!targetRowVisible) {
+      await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-03-row-not-found.png`, fullPage: true }).catch(() => undefined);
+      return { ok: false, error: `seleção "${slotPosition}" não achada no modal` };
+    }
+    // Acha o link ✏️ — Vendtef usa <a class="edit-selecao"> mas variações existem
+    const editLink = targetRow.first().locator('a.edit-selecao, a[title*="Editar"], button.btn-primary, .glyphicon-pencil').first();
+    const editVisible = await editLink.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!editVisible) {
+      // Fallback: clica no primeiro <a> ou <button> azul (.btn-primary) da row
+      const fallback = targetRow.first().locator('a, button').first();
+      const fbVisible = await fallback.isVisible({ timeout: 2_000 }).catch(() => false);
+      if (!fbVisible) {
+        await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-03-no-edit.png`, fullPage: true }).catch(() => undefined);
+        return { ok: false, error: `botão editar não achado na row do slot ${slotPosition}` };
+      }
+      await fallback.click({ force: true });
+    } else {
+      await editLink.click({ force: true });
+    }
     await page.waitForTimeout(1_500);
+    await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-04-edit-modal.png`, fullPage: true }).catch(() => undefined);
 
-    // Clica ✏️ da seleção alvo
-    const clicked = await page.evaluate((sel) => {
-      const modal = document.querySelector('.modal.in, .modal.show');
-      if (!modal) return { ok: false, reason: 'modal Seleções fechado' };
-      const rows = Array.from(modal.querySelectorAll('tbody tr'));
-      const target = rows.find((r) => (r.children[0] as HTMLElement)?.textContent?.trim() === sel);
-      if (!target) return { ok: false, reason: `seleção "${sel}" não achada` };
-      const link = target.querySelector('a.edit-selecao') as HTMLAnchorElement | null;
-      if (!link) return { ok: false, reason: 'a.edit-selecao não achado' };
-      link.click();
-      return { ok: true };
-    }, slotPosition);
-    if (!clicked.ok) return { ok: false, error: clicked.reason };
+    // Dump HTML do modal Editar Produto pra debug
+    try {
+      const editHtml = await page.locator('.modal.in:has(.modal-title:has-text("Editar Produto")), .modal.show:has(.modal-title:has-text("Editar Produto"))').first().innerHTML({ timeout: 2_000 });
+      writeFileSync(`${OUT_DIR}/swap-${slotPosition}-edit-modal.html`, editHtml);
+    } catch {}
 
+    // Espera modal "Editar Produto" — sem Array.from (Vendtef SPA quebra
+    // Array.from em algum contexto via UtilityScript do Playwright)
     await page.waitForFunction(
       () => {
-        const all = Array.from(document.querySelectorAll('.modal.in, .modal.show'));
-        return all.some((m) => m.querySelector('.modal-title')?.textContent?.includes('Editar Produto'));
+        const nodes = document.querySelectorAll('.modal.in, .modal.show');
+        for (let i = 0; i < nodes.length; i++) {
+          const title = nodes[i].querySelector('.modal-title');
+          if (title?.textContent?.includes('Editar Produto')) return true;
+        }
+        return false;
       },
       { timeout: 10_000 },
     );
 
-    // Acha select de produto (pid) e seleciona pelo label que bate
-    const swapResult = await page.evaluate((targetName) => {
-      const modals = Array.from(document.querySelectorAll('.modal.in, .modal.show'));
-      const editModal = modals.find((m) => m.querySelector('.modal-title')?.textContent?.includes('Editar Produto'));
-      if (!editModal) return { ok: false, reason: 'modal Editar Produto não achado' };
-      const pidSelect = editModal.querySelector<HTMLSelectElement>('[name="pid"]');
-      if (!pidSelect) return { ok: false, reason: 'campo pid não achado' };
-      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
-      const t = norm(targetName);
-      const tokens = t.split(' ').filter((w) => w.length >= 3);
-      const opts = Array.from(pidSelect.options);
-      // Match: todos os tokens significativos da target aparecem no label da option
-      const best = opts.find((o) => {
-        const n = norm(o.textContent ?? '');
-        return tokens.length > 0 && tokens.every((tok) => n.includes(tok));
-      });
-      if (!best) {
-        return {
-          ok: false,
-          reason: `produto "${targetName}" não bate com nenhuma option do select pid`,
-          sampleOptions: opts.slice(0, 20).map((o) => o.textContent?.trim()),
-        };
-      }
-      pidSelect.value = best.value;
-      pidSelect.dispatchEvent(new Event('input', { bubbles: true }));
-      pidSelect.dispatchEvent(new Event('change', { bubbles: true }));
-      return { ok: true, newPid: best.value, newLabel: best.textContent?.trim() };
-    }, targetProductName);
+    // Vendtef mudou UI: [name="pid"] agora é jQuery UI Autocomplete (input[text]).
+    // Fluxo: limpa input → digita texto → ajax retorna sugestões → click na opção.
+    // O ID real do produto é setado em hidden <input name="codigo">.
+    const pidInput = page.locator('input[name="pid"]:visible').first();
+    const pidVisible = await pidInput.isVisible({ timeout: 3_000 }).catch(() => false);
+    if (!pidVisible) {
+      await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-05-no-pid.png`, fullPage: true }).catch(() => undefined);
+      return { ok: false, error: 'input[name="pid"] não visível no modal Editar' };
+    }
+
+    // Limpa input (triple-click → seleciona tudo → backspace)
+    await pidInput.click({ clickCount: 3 });
+    await page.waitForTimeout(150);
+    await pidInput.press('Backspace');
+    await page.waitForTimeout(300);
+
+    // Tokens pra busca
+    const tokens = targetProductName
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9 ]/g, ' ')
+      .split(/\s+/)
+      .filter((t) => t.length >= 3);
+    // Tenta um termo de busca menos restritivo (só 2 tokens) — autocomplete
+    // do Vendtef faz LIKE no início ou contains
+    const searchTerm = tokens.slice(0, 2).join(' ') || targetProductName.slice(0, 20);
+    await pidInput.type(searchTerm, { delay: 80 });
+    await page.waitForTimeout(2_000); // espera AJAX
+
+    // Aguarda dropdown ui-autocomplete aparecer
+    const dropdown = page.locator('.ui-autocomplete:visible').first();
+    const dropdownVisible = await dropdown.isVisible({ timeout: 5_000 }).catch(() => false);
+    if (!dropdownVisible) {
+      await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-05-no-dropdown.png`, fullPage: true }).catch(() => undefined);
+      return { ok: false, error: `dropdown autocomplete não apareceu pra "${searchTerm}"` };
+    }
+    await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-05-dropdown.png`, fullPage: true }).catch(() => undefined);
+
+    // Acha a opção que melhor bate. Estratégia: SCORE = (tokens que batem) / total.
+    // Aceita melhor opção com score >= 0.5 (50% dos tokens significativos presentes).
+    // Cobre casos: "Red Bull Frutas Vermelhas Sem Açúcar" vs "BEB ENERG RED BULL FRUTAS VERMELHAS"
+    // (4/6 tokens batem = 0.67 ✓).
+    const optionMatch = await page.evaluate(
+      ({ targetName, allTokens }) => {
+        const norm = (s: string) =>
+          s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim();
+        const targetNorm = norm(targetName);
+        const items = document.querySelectorAll('.ui-autocomplete li.ui-menu-item, .ui-autocomplete li');
+        const labels: string[] = [];
+        let exactIdx = -1;
+        let bestIdx = -1;
+        let bestScore = 0;
+        const totalTokens = allTokens.length || 1;
+        for (let i = 0; i < items.length; i++) {
+          const txt = (items[i].textContent ?? '').trim();
+          if (labels.length < 15) labels.push(txt);
+          const txtNorm = norm(txt);
+          if (txtNorm === targetNorm) {
+            exactIdx = i;
+            break;
+          }
+          let hits = 0;
+          for (const tok of allTokens) {
+            if (txtNorm.includes(tok)) hits++;
+          }
+          const score = hits / totalTokens;
+          if (score > bestScore) {
+            bestScore = score;
+            bestIdx = i;
+          }
+        }
+        const finalIdx = exactIdx !== -1 ? exactIdx : (bestScore >= 0.5 ? bestIdx : -1);
+        if (finalIdx === -1) {
+          return { ok: false, labels, bestScore };
+        }
+        (items[finalIdx] as HTMLElement).click();
+        return { ok: true, label: (items[finalIdx].textContent ?? '').trim(), labels, score: exactIdx !== -1 ? 1 : bestScore };
+      },
+      { targetName: targetProductName, allTokens: tokens },
+    );
+
+    if (!optionMatch.ok) {
+      return {
+        ok: false,
+        error: `nenhuma opção do autocomplete bate com "${targetProductName}". Opções vistas: ${optionMatch.labels?.join(' | ') ?? '—'}`,
+      };
+    }
+    await page.waitForTimeout(800);
+    await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-06-selected.png`, fullPage: true }).catch(() => undefined);
+
+    // Pega o novo código (id interno) pra retornar
+    const newPid = await page.locator('input[name="codigo"]').first().inputValue().catch(() => '');
+    const swapResult = { ok: true as const, newPid: newPid || 'unknown', newLabel: optionMatch.label };
 
     if (!swapResult.ok) {
       writeFileSync(
@@ -423,26 +535,34 @@ async function swapSlotProduct(
     }
     await page.screenshot({ path: `${OUT_DIR}/swap-${slotPosition}-set.png`, fullPage: true });
 
-    // Submit do modal — botão "Editar"
+    // Submit do modal — botão "Editar" (sem Array.from)
     const submitInfo = await page.evaluate(() => {
-      const modals = Array.from(document.querySelectorAll('.modal.in, .modal.show'));
-      const top = modals[modals.length - 1] as HTMLElement | undefined;
-      if (!top) return { ok: false };
-      const cands = Array.from(top.querySelectorAll<HTMLElement>('button, input[type="submit"], input[type="button"]')).filter((b) => {
+      const modals = document.querySelectorAll('.modal.in, .modal.show');
+      if (modals.length === 0) return { ok: false };
+      const top = modals[modals.length - 1] as HTMLElement;
+      const btns = top.querySelectorAll('button, input[type="submit"], input[type="button"]');
+      const cands: HTMLElement[] = [];
+      for (let i = 0; i < btns.length; i++) {
+        const b = btns[i] as HTMLElement;
         const visible = b.offsetParent !== null && b.getBoundingClientRect().width > 0;
-        if (!visible) return false;
+        if (!visible) continue;
         const text = (b.tagName === 'INPUT' ? (b as HTMLInputElement).value : (b.textContent ?? '')).trim();
-        return /^Editar$/i.test(text);
-      });
+        if (/^Editar$/i.test(text)) cands.push(b);
+      }
       if (cands.length === 0) return { ok: false };
-      const primary = cands.find((c) => c.className.includes('btn-primary')) ?? cands[0];
+      let primary: HTMLElement = cands[0];
+      for (const c of cands) {
+        if (c.className.includes('btn-primary')) { primary = c; break; }
+      }
       primary.click();
       return { ok: true };
     });
     if (!submitInfo.ok) {
       await page.evaluate(() => {
-        const top = Array.from(document.querySelectorAll('.modal.in, .modal.show')).pop() as HTMLElement | undefined;
-        top?.querySelector('form')?.requestSubmit();
+        const modals = document.querySelectorAll('.modal.in, .modal.show');
+        if (modals.length === 0) return;
+        const top = modals[modals.length - 1] as HTMLElement;
+        top.querySelector('form')?.requestSubmit();
       });
     }
     await page.waitForTimeout(3_500);
