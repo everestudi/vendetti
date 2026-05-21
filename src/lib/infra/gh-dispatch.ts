@@ -13,6 +13,7 @@ export type WorkflowEventType =
   | 'mara-sync'
   | 'vendtef-sync'
   | 'vendtef-abastecimento'
+  | 'vendtef-slot-swap'
   | 'sac-cleanup'
   // Testes Vendtef via Augusto/Rita (mapeamento solicitado pelo Luís)
   | 'vendtef-test-login'

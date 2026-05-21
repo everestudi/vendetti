@@ -31,7 +31,9 @@
     "vendtef:entrada": "dotenv -e .env.local -- tsx src/scrapers/vendtef/entrada-estoque.ts",
     "vendtef:entrada-ci": "tsx src/scrapers/vendtef/entrada-estoque.ts",
     "vendtef:abastecimento": "dotenv -e .env.local -- tsx src/scrapers/vendtef/abastecimento.ts",
-    "vendtef:abastecimento-ci": "tsx src/scrapers/vendtef/abastecimento.ts"
+    "vendtef:abastecimento-ci": "tsx src/scrapers/vendtef/abastecimento.ts",
+    "vendtef:slot-swap": "dotenv -e .env.local -- tsx src/scrapers/vendtef/slot-swap.ts",
+    "vendtef:slot-swap-ci": "tsx src/scrapers/vendtef/slot-swap.ts"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^2.0.79",

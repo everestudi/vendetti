@@ -1,0 +1,54 @@
+name: Vendtef slot swap
+
+# Disparado pelo Vercel (src/app/decisions/actions.ts approveDecision) quando
+# Luís aprova uma Decision de inventário que tem data.pendingVendtefSwaps.
+# Roda Playwright pra trocar o produto cadastrado em cada slot no Vendtef
+# (via modal "Editar Produto"). Não abastece — só sync de cadastro.
+#
+# Ao terminar com sucesso, slot.manualOverrideAt é liberado (mara_sync volta
+# a sincronizar normalmente). Se falhar, mantém override + grava resultsLog.
+
+on:
+  workflow_dispatch:
+    inputs:
+      decision_id:
+        description: 'Decision ID (com data.pendingVendtefSwaps)'
+        required: true
+        type: string
+  repository_dispatch:
+    types: [vendtef-slot-swap]
+
+jobs:
+  swap:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run slot-swap
+        env:
+          HEADLESS: 'true'
+          DECISION_ID: ${{ github.event.inputs.decision_id || github.event.client_payload.decision_id }}
+        run: npm run vendtef:slot-swap-ci
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendtef-slot-swap-${{ github.run_id }}
+          path: tmp/vendtef-abastecimento/
+          retention-days: 14
+          if-no-files-found: ignore

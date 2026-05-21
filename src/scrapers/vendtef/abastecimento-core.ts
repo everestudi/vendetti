@@ -504,6 +504,61 @@ async function confirmAndCheckSuccess(page: Page): Promise<{ ok: boolean; error?
  *     do currentSlotProduct → cadastrarProduto se não existe + swapSlotProduct.
  *  2. Pass 2: abrir Abastecimento, preencher qty pra cada slot, submit, confirmar.
  */
+/**
+ * Roda APENAS swaps de produto no Vendtef (sem abastecer estoque).
+ *
+ * Usado quando Decision INVENTÁRIO foi aprovada com mudanças de skuId
+ * (slot apontava pra produto X no Vendtef, mas Weverton/Luís confirmou que
+ * fisicamente é produto Y). Esta função vai no Vendtef e troca o cadastro.
+ *
+ * Pode rodar standalone em GH Actions (vendtef-slot-swap.yml) — leve, ~30s
+ * por swap (login + abre Seleções + Editar Produto + select pid + save).
+ */
+export async function runSlotSwapsOnly(
+  swaps: Array<{ slotPosition: string; targetProductName: string }>,
+): Promise<{
+  ok: boolean;
+  results: Array<{ slotPosition: string; ok: boolean; newPid?: string; error?: string }>;
+}> {
+  mkdirSync(OUT_DIR, { recursive: true });
+  writeFileSync(`${OUT_DIR}/.touch`, new Date().toISOString());
+  writeFileSync(`${OUT_DIR}/slot-swap-input.json`, JSON.stringify(swaps, null, 2));
+
+  const results: Array<{ slotPosition: string; ok: boolean; newPid?: string; error?: string }> = [];
+
+  const browser: Browser = await chromium.launch({ headless: HEADLESS });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'pt-BR' });
+  await ctx.addInitScript(() => {
+    // @ts-expect-error global pro page.evaluate
+    if (typeof window.__name === 'undefined') window.__name = (fn) => fn;
+  });
+
+  try {
+    console.log('→ login ERP…');
+    await freshLogin(ctx);
+    console.log('✓ logado · SSO portalvendtef…');
+    await ssoVendtef(ctx);
+    console.log(`✓ SSO ok · ${swaps.length} swap(s) a executar`);
+
+    for (const s of swaps) {
+      console.log(`  → slot ${s.slotPosition} → "${s.targetProductName}"`);
+      const r = await swapSlotProduct(ctx, s.slotPosition, s.targetProductName);
+      results.push({ slotPosition: s.slotPosition, ok: r.ok, newPid: r.newPid, error: r.error });
+      if (r.ok) {
+        console.log(`    ✓ ok · pid=${r.newPid}`);
+      } else {
+        console.log(`    ✗ falhou: ${r.error}`);
+      }
+    }
+    const okCount = results.filter((r) => r.ok).length;
+    console.log(`\n=== ${okCount}/${swaps.length} swaps OK ===`);
+    return { ok: okCount === swaps.length, results };
+  } finally {
+    await ctx.close();
+    await browser.close();
+  }
+}
+
 export async function runAbastecimento(items: AbastecimentoItemInput[]): Promise<AbastecimentoRunResult> {
   mkdirSync(OUT_DIR, { recursive: true });
   writeFileSync(`${OUT_DIR}/.touch`, new Date().toISOString());

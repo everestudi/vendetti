@@ -499,8 +499,62 @@ function PhysicalCard({ d }: { d: Decision }) {
   );
 }
 
-function VendtefSwapsAlert({ swaps }: { swaps: Array<{ slotPosition: string; fromSkuName: string | null; toSkuName: string }> }) {
-  if (!swaps?.length) return null;
+interface SwapResult { slotPosition: string; ok: boolean; newPid?: string; error?: string }
+
+function VendtefSwapsAlert({
+  swaps,
+  dispatchedAt,
+  completedAt,
+  results,
+}: {
+  swaps: Array<{ slotPosition: string; fromSkuName: string | null; toSkuName: string }>;
+  dispatchedAt?: string | null;
+  completedAt?: string | null;
+  results?: SwapResult[] | null;
+}) {
+  if (!swaps?.length && !results?.length) return null;
+  const dispatched = Boolean(dispatchedAt);
+  const completed = Boolean(completedAt);
+  const dispatchedAge = dispatched && !completed && dispatchedAt
+    ? Math.round((Date.now() - new Date(dispatchedAt).getTime()) / 1000)
+    : null;
+  const failedResults = results?.filter((r) => !r.ok) ?? [];
+
+  // Estado: completou tudo (sem falhas, sem pendentes)
+  if (completed && swaps.length === 0 && failedResults.length === 0) {
+    return (
+      <div className="my-2 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3">
+        <strong className="text-sm text-emerald-900">✅ Vendtef sincronizado</strong>
+        <p className="mt-1 text-[11px] text-emerald-800/85">
+          Scraper aplicou todos os swaps no Vendtef. Banco e Vendtef batem.
+          {results && ` (${results.length} slot${results.length > 1 ? 's' : ''})`}
+        </p>
+      </div>
+    );
+  }
+
+  // Estado: rodando (dispatched mas não completou)
+  if (dispatched && !completed) {
+    return (
+      <div className="my-2 rounded-lg border-2 border-blue-300 bg-blue-50 p-3">
+        <div className="flex items-baseline gap-2">
+          <strong className="text-sm text-blue-900">🤖 Sincronizando Vendtef…</strong>
+          <span className="text-[10px] text-blue-800/70">há {dispatchedAge}s</span>
+        </div>
+        <p className="mt-1 text-[11px] text-blue-800/85">
+          Scraper rodando em GitHub Actions. {swaps.length} slot{swaps.length > 1 ? 's' : ''} a ajustar (~30-60s cada).
+          Recarrega a página em 1-2 minutos pra ver o status final.
+        </p>
+        <ul className="mt-1 space-y-0.5 text-[10px] text-blue-700/75">
+          {swaps.map((s) => (
+            <li key={s.slotPosition}>· slot {s.slotPosition.padStart(2, '0')}: {s.fromSkuName ?? '—'} → {s.toSkuName}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Estado: pendente (sem dispatch ainda — caso legado ou falha do dispatch)
   return (
     <div className="my-2 rounded-lg border-2 border-amber-400 bg-amber-50 p-3">
       <div className="mb-1.5 flex items-baseline gap-2">
@@ -508,36 +562,53 @@ function VendtefSwapsAlert({ swaps }: { swaps: Array<{ slotPosition: string; fro
         <span className="text-[10px] text-amber-800/70">({swaps.length} slot{swaps.length > 1 ? 's' : ''})</span>
       </div>
       <p className="mb-2 text-[11px] text-amber-900/80">
-        O banco já tá atualizado, mas o <strong>Vendtef ainda tem o produto antigo cadastrado</strong> nesses slots.
-        Pra evitar vendas com nome errado, ajuste no Vendtef:
+        O banco tá atualizado, mas o Vendtef ainda tem o produto antigo cadastrado.
+        {failedResults.length > 0 && (
+          <span className="ml-1 font-semibold text-rose-700">⚠️ Scraper anterior falhou — ajuste manual ou re-dispare.</span>
+        )}
       </p>
       <ul className="space-y-1 text-[11px] text-amber-900/90">
-        {swaps.map((s) => (
-          <li key={s.slotPosition} className="flex items-baseline gap-2 rounded bg-white/60 px-2 py-1">
-            <span className="font-mono font-bold text-amber-900">slot {s.slotPosition.padStart(2, '0')}</span>
-            <span className="text-amber-700/70">de</span>
-            <span className="italic">{s.fromSkuName ?? '—'}</span>
-            <span className="text-amber-700/70">→</span>
-            <span className="font-semibold">{s.toSkuName}</span>
-          </li>
-        ))}
+        {swaps.map((s) => {
+          const failed = failedResults.find((r) => r.slotPosition === s.slotPosition);
+          return (
+            <li key={s.slotPosition} className="flex items-baseline gap-2 rounded bg-white/60 px-2 py-1">
+              <span className="font-mono font-bold text-amber-900">slot {s.slotPosition.padStart(2, '0')}</span>
+              <span className="text-amber-700/70">de</span>
+              <span className="italic">{s.fromSkuName ?? '—'}</span>
+              <span className="text-amber-700/70">→</span>
+              <span className="font-semibold">{s.toSkuName}</span>
+              {failed && <span className="ml-2 text-[9px] text-rose-700">✗ {failed.error?.slice(0, 60)}</span>}
+            </li>
+          );
+        })}
       </ul>
-      <p className="mt-2 text-[10px] text-amber-800/65 italic">
-        ℹ️ Banco protegido (manualOverrideAt setado) — mara_sync não vai reverter. Mas vendas no Vendtef saem com o nome cadastrado lá. Em breve: scraper auto-aplica esses swaps no Vendtef ao aprovar.
-      </p>
     </div>
   );
 }
 
 function HistoryCard({ d }: { d: Decision }) {
-  const data = (d.data ?? {}) as { pendingVendtefSwaps?: Array<{ slotPosition: string; fromSkuName: string | null; toSkuName: string }> };
+  const data = (d.data ?? {}) as {
+    pendingVendtefSwaps?: Array<{ slotPosition: string; fromSkuName: string | null; toSkuName: string }>;
+    slotSwapDispatchedAt?: string;
+    slotSwapCompletedAt?: string;
+    slotSwapResults?: SwapResult[];
+  };
+  const hasSwapInfo =
+    (data.pendingVendtefSwaps && data.pendingVendtefSwaps.length > 0) ||
+    data.slotSwapDispatchedAt ||
+    data.slotSwapResults;
   return (
     <article className="rounded border border-navy/10 bg-white p-3 text-xs">
       <DecisionHeader d={d} />
       <div className="mt-1 text-navy/85">{d.summary}</div>
       {d.rejectReason && <div className="mt-1 text-rose-700/70">motivo: {d.rejectReason}</div>}
-      {d.status === 'EXECUTED' && data.pendingVendtefSwaps && data.pendingVendtefSwaps.length > 0 && (
-        <VendtefSwapsAlert swaps={data.pendingVendtefSwaps} />
+      {d.status === 'EXECUTED' && hasSwapInfo && (
+        <VendtefSwapsAlert
+          swaps={data.pendingVendtefSwaps ?? []}
+          dispatchedAt={data.slotSwapDispatchedAt}
+          completedAt={data.slotSwapCompletedAt}
+          results={data.slotSwapResults}
+        />
       )}
     </article>
   );

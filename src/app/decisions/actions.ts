@@ -97,6 +97,39 @@ export async function approveDecision(id: string) {
           where: { id },
           data: { status: 'EXECUTED' },
         });
+
+        // === Auto-dispatch GH workflow pra sync de cadastro no Vendtef ===
+        // Snapshot atualizou skuId de slots no banco com manualOverrideAt setado.
+        // Pro Vendtef refletir o produto correto (evitar venda com nome errado),
+        // dispara o scraper vendtef-slot-swap. Termina em ~30-60s/slot.
+        const refreshed = await prisma.decision.findUnique({ where: { id } });
+        const refreshedData = (refreshed?.data ?? {}) as Record<string, unknown>;
+        const pending = refreshedData.pendingVendtefSwaps as Array<unknown> | undefined;
+        if (pending && pending.length > 0) {
+          try {
+            const { dispatchWorkflow } = await import('@/lib/infra/gh-dispatch');
+            const disp = await dispatchWorkflow('vendtef-slot-swap', {
+              decision_id: id,
+              triggered_by: 'approveDecision-inventory',
+            });
+            if (disp.ok) {
+              await prisma.decision.update({
+                where: { id },
+                data: {
+                  data: {
+                    ...refreshedData,
+                    slotSwapDispatchedAt: new Date().toISOString(),
+                  } as unknown as object,
+                },
+              });
+              console.log(`[approveDecision inventory] GH workflow vendtef-slot-swap disparado (${pending.length} swaps)`);
+            } else {
+              console.warn(`[approveDecision inventory] dispatch falhou: ${disp.error}`);
+            }
+          } catch (e) {
+            console.warn('[approveDecision inventory dispatch]', e instanceof Error ? e.message : e);
+          }
+        }
       } else {
         await prisma.decision.update({
           where: { id },
