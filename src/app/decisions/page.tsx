@@ -647,12 +647,105 @@ function VendtefSwapsAlert({
   );
 }
 
+interface InventarioApplied { slotPosition: string; qtyApplied: number; source: 'weverton' | 'repeat-disponivel' | 'skip' }
+interface InventarioBefore { slotPosition: string; produto: string; disponivel: number }
+
+function InventarioVendtefStatus({
+  dispatchedAt,
+  completedAt,
+  before,
+  applied,
+  error,
+}: {
+  dispatchedAt?: string;
+  completedAt?: string;
+  before?: InventarioBefore[];
+  applied?: InventarioApplied[];
+  error?: string | null;
+}) {
+  if (!dispatchedAt && !applied?.length) return null;
+  const dispatched = Boolean(dispatchedAt);
+  const completed = Boolean(completedAt);
+  const dispatchedAge = dispatched && !completed && dispatchedAt
+    ? Math.round((Date.now() - new Date(dispatchedAt).getTime()) / 1000)
+    : null;
+
+  if (dispatched && !completed) {
+    return (
+      <div className="my-2 rounded-lg border-2 border-blue-300 bg-blue-50 p-3">
+        <div className="flex items-baseline gap-2">
+          <strong className="text-sm text-blue-900">📋 Lançando Inventário no Vendtef…</strong>
+          <span className="text-[10px] text-blue-800/70">há {dispatchedAge}s</span>
+        </div>
+        <p className="mt-1 text-[11px] text-blue-800/85">
+          Scraper rodando: tipo Inventário · funcionário Weverton · preenchendo Qtde por slot. ~1-2 min.
+          Recarrega a página pra ver o resultado.
+        </p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="my-2 rounded-lg border-2 border-rose-300 bg-rose-50 p-3">
+        <strong className="text-sm text-rose-900">⚠️ Inventário Vendtef falhou</strong>
+        <p className="mt-1 text-[11px] text-rose-800/85 font-mono">{error}</p>
+      </div>
+    );
+  }
+
+  if (completed && applied) {
+    const fromWeverton = applied.filter((a) => a.source === 'weverton').length;
+    const repeated = applied.filter((a) => a.source === 'repeat-disponivel').length;
+    return (
+      <details className="my-2 rounded-lg border-2 border-emerald-300 bg-emerald-50 p-3">
+        <summary className="cursor-pointer text-sm font-semibold text-emerald-900">
+          ✅ Inventário lançado no Vendtef · {applied.length} slot(s)
+          <span className="ml-2 text-[10px] font-normal text-emerald-800/70">
+            ({fromWeverton} do Weverton · {repeated} repetidos do &quot;Disponível&quot;)
+          </span>
+        </summary>
+        <div className="mt-2 overflow-x-auto">
+          <table className="w-full text-[10px]">
+            <thead className="text-emerald-900/65 uppercase">
+              <tr><th className="px-1 text-left">slot</th><th className="px-1 text-left">produto</th><th className="px-1 text-center">antes</th><th className="px-1 text-center">depois</th><th className="px-1 text-left">origem</th></tr>
+            </thead>
+            <tbody>
+              {applied.map((a) => {
+                const b = before?.find((x) => x.slotPosition === a.slotPosition);
+                const sourceLabel = a.source === 'weverton' ? '👷 Weverton' : a.source === 'skip' ? '⏭ pulado' : '↻ mantido';
+                const changed = b && b.disponivel !== a.qtyApplied;
+                return (
+                  <tr key={a.slotPosition} className={`border-t border-emerald-200 ${changed ? 'font-semibold' : ''}`}>
+                    <td className="px-1 font-mono">{a.slotPosition.padStart(2, '0')}</td>
+                    <td className="px-1 truncate max-w-[200px]" title={b?.produto ?? ''}>{b?.produto ?? '—'}</td>
+                    <td className="px-1 text-center text-emerald-800/70">{b?.disponivel ?? '—'}</td>
+                    <td className={`px-1 text-center ${changed ? 'text-emerald-900' : 'text-emerald-800/60'}`}>{a.qtyApplied}</td>
+                    <td className="px-1 text-[9px] text-emerald-700/80">{sourceLabel}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    );
+  }
+
+  return null;
+}
+
 function HistoryCard({ d }: { d: Decision }) {
   const data = (d.data ?? {}) as {
     pendingVendtefSwaps?: Array<{ slotPosition: string; fromSkuName: string | null; toSkuName: string }>;
     slotSwapDispatchedAt?: string;
     slotSwapCompletedAt?: string;
     slotSwapResults?: SwapResult[];
+    inventarioVendtefDispatchedAt?: string;
+    inventarioVendtefCompletedAt?: string;
+    inventarioVendtefBefore?: InventarioBefore[];
+    inventarioVendtefApplied?: InventarioApplied[];
+    inventarioVendtefGeneralError?: string | null;
   };
   const hasSwapInfo =
     (data.pendingVendtefSwaps && data.pendingVendtefSwaps.length > 0) ||
@@ -669,6 +762,15 @@ function HistoryCard({ d }: { d: Decision }) {
           dispatchedAt={data.slotSwapDispatchedAt}
           completedAt={data.slotSwapCompletedAt}
           results={data.slotSwapResults}
+        />
+      )}
+      {d.status === 'EXECUTED' && (data.inventarioVendtefDispatchedAt || data.inventarioVendtefApplied) && (
+        <InventarioVendtefStatus
+          dispatchedAt={data.inventarioVendtefDispatchedAt}
+          completedAt={data.inventarioVendtefCompletedAt}
+          before={data.inventarioVendtefBefore}
+          applied={data.inventarioVendtefApplied}
+          error={data.inventarioVendtefGeneralError}
         />
       )}
     </article>

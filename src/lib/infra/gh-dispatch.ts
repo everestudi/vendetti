@@ -14,6 +14,7 @@ export type WorkflowEventType =
   | 'vendtef-sync'
   | 'vendtef-abastecimento'
   | 'vendtef-slot-swap'
+  | 'vendtef-inventario'
   | 'sac-cleanup'
   // Testes Vendtef via Augusto/Rita (mapeamento solicitado pelo Luís)
   | 'vendtef-test-login'

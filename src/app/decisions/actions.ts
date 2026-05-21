@@ -105,9 +105,9 @@ export async function approveDecision(id: string) {
         const refreshed = await prisma.decision.findUnique({ where: { id } });
         const refreshedData = (refreshed?.data ?? {}) as Record<string, unknown>;
         const pending = refreshedData.pendingVendtefSwaps as Array<unknown> | undefined;
+        const { dispatchWorkflow } = await import('@/lib/infra/gh-dispatch');
         if (pending && pending.length > 0) {
           try {
-            const { dispatchWorkflow } = await import('@/lib/infra/gh-dispatch');
             const disp = await dispatchWorkflow('vendtef-slot-swap', {
               decision_id: id,
               triggered_by: 'approveDecision-inventory',
@@ -122,13 +122,41 @@ export async function approveDecision(id: string) {
                   } as unknown as object,
                 },
               });
-              console.log(`[approveDecision inventory] GH workflow vendtef-slot-swap disparado (${pending.length} swaps)`);
+              console.log(`[approveDecision inventory] vendtef-slot-swap disparado (${pending.length} swaps)`);
             } else {
-              console.warn(`[approveDecision inventory] dispatch falhou: ${disp.error}`);
+              console.warn(`[approveDecision inventory] swap dispatch falhou: ${disp.error}`);
             }
           } catch (e) {
-            console.warn('[approveDecision inventory dispatch]', e instanceof Error ? e.message : e);
+            console.warn('[approveDecision inventory swap dispatch]', e instanceof Error ? e.message : e);
           }
+        }
+
+        // === Auto-dispatch GH workflow pra registrar Inventário no Vendtef ===
+        // Lança a operação de Inventário oficial — preenche Qtde por slot
+        // e salva no portalvendtef. Espelha no banco.
+        try {
+          const disp = await dispatchWorkflow('vendtef-inventario', {
+            decision_id: id,
+            triggered_by: 'approveDecision-inventory',
+          });
+          if (disp.ok) {
+            const reRefreshed = await prisma.decision.findUnique({ where: { id } });
+            const reData = (reRefreshed?.data ?? {}) as Record<string, unknown>;
+            await prisma.decision.update({
+              where: { id },
+              data: {
+                data: {
+                  ...reData,
+                  inventarioVendtefDispatchedAt: new Date().toISOString(),
+                } as unknown as object,
+              },
+            });
+            console.log(`[approveDecision inventory] vendtef-inventario disparado`);
+          } else {
+            console.warn(`[approveDecision inventory] inventario dispatch falhou: ${disp.error}`);
+          }
+        } catch (e) {
+          console.warn('[approveDecision inventory inventario dispatch]', e instanceof Error ? e.message : e);
         }
       } else {
         await prisma.decision.update({

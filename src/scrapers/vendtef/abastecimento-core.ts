@@ -620,6 +620,261 @@ async function confirmAndCheckSuccess(page: Page): Promise<{ ok: boolean; error?
  *  2. Pass 2: abrir Abastecimento, preencher qty pra cada slot, submit, confirmar.
  */
 /**
+ * Roda Operação de **Inventário** dos slots da máquina TCN no portalvendtef.
+ *
+ * Caminho confirmado pelo Luís:
+ *   VendTEF > Máquinas > Moderninha 40984 TCNFLEX6G > ⚙️ Operações de
+ *   estoque > Nova operação > tipoOperacao=Inventário > funcionário=Weverton
+ *   > preencher Qtde por slot > Salvar.
+ *
+ * URL direta: /operacoes-estoques/lancarOperacao/tid/1
+ *
+ * Regras importantes:
+ *  - **TODOS os slots devem ter Qtde preenchida** (Vendtef não aceita vazio).
+ *    Pra slots sem info do Weverton (items[].qty=null), repete o que tá em
+ *    "Disponível" (estado atual).
+ *  - Funcionário deve ser **Weverton** (foi ele quem fez a contagem).
+ *  - Espera 3s após selecionar tipoOperacao (tabela é carregada via AJAX).
+ *  - Captura "Disponível" ANTES pra a gente saber como tava antes do save.
+ */
+export async function runInventarioMaquina(
+  items: Array<{ slotPosition: string; qty: number | null; skip?: boolean }>,
+  options: { funcionario?: string } = {},
+): Promise<{
+  ok: boolean;
+  /** Estado "Disponível" capturado ANTES do save — pra Luís ver como tava. */
+  beforeSnapshot: Array<{ slotPosition: string; produto: string; disponivel: number }>;
+  /** Qty efetivamente lançada por slot (pode ter sido repetida de disponível). */
+  applied: Array<{ slotPosition: string; qtyApplied: number; source: 'weverton' | 'repeat-disponivel' | 'skip' }>;
+  generalError?: string;
+}> {
+  mkdirSync(OUT_DIR, { recursive: true });
+  writeFileSync(`${OUT_DIR}/.touch`, new Date().toISOString());
+  writeFileSync(`${OUT_DIR}/inv-input.json`, JSON.stringify({ items, options }, null, 2));
+
+  const funcionarioNome = options.funcionario ?? 'Weverton';
+  const OP_URL = 'https://www.portalvendtef.com.br/operacoes-estoques/lancarOperacao/tid/1';
+
+  const beforeSnapshot: Array<{ slotPosition: string; produto: string; disponivel: number }> = [];
+  const applied: Array<{ slotPosition: string; qtyApplied: number; source: 'weverton' | 'repeat-disponivel' | 'skip' }> = [];
+
+  const browser: Browser = await chromium.launch({ headless: HEADLESS });
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 900 }, locale: 'pt-BR' });
+  await ctx.addInitScript(() => {
+    // @ts-expect-error global pro page.evaluate
+    if (typeof window.__name === 'undefined') window.__name = (fn) => fn;
+  });
+
+  const page = await ctx.newPage();
+  page.setDefaultTimeout(30_000);
+
+  try {
+    console.log('→ login ERP + SSO VendTEF…');
+    await freshLogin(ctx);
+    await ssoVendtef(ctx);
+
+    console.log(`→ goto ${OP_URL}`);
+    await page.goto(OP_URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.waitForTimeout(1_500);
+    await dismissModals(page);
+    await page.screenshot({ path: `${OUT_DIR}/inv-01-loaded.png`, fullPage: true });
+
+    // Seleciona tipoOperacao = Inventário (index 1: Selecione, Inventário, Inv Parcial, Abastec, Descarte, PickList)
+    const tipoSel = page.locator('#tipoOperacao').first();
+    const tipoOpts = await tipoSel.locator('option').allTextContents();
+    const invIdx = tipoOpts.findIndex((o) => /^invent[áa]rio$/i.test(o.trim()));
+    if (invIdx < 0) {
+      return {
+        ok: false,
+        beforeSnapshot,
+        applied,
+        generalError: `tipo Inventário não achado (opções: ${tipoOpts.join(', ')})`,
+      };
+    }
+    await tipoSel.selectOption({ index: invIdx });
+    console.log(`  ✓ tipoOperacao = Inventário · aguardando 4s (AJAX)…`);
+    await page.waitForTimeout(4_000);
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => undefined);
+    await page.screenshot({ path: `${OUT_DIR}/inv-02-tipo-selected.png`, fullPage: true });
+
+    // Espera tabela com mpid_* aparecer
+    await page.waitForSelector('input[name^="mpid_"]', { timeout: 15_000 });
+
+    // Captura estrutura: mola, mpid, produto, disponivel pra cada row
+    const rows = await page.evaluate(() => {
+      const trs = document.querySelectorAll('table tbody tr');
+      const out: Array<{ mola: string; mpid: string; produto: string; disponivel: number; capMax: number; rowIndex: number }> = [];
+      for (let i = 0; i < trs.length; i++) {
+        const tr = trs[i] as HTMLTableRowElement;
+        if ((tr as HTMLElement).offsetParent === null) continue;
+        const cells = tr.querySelectorAll('td');
+        // Headers: Mola | Qtde | Produto | Disponível | Cap. Máx. | Qtde vendida X dias | Vencimento
+        const mola = (cells[0]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+        if (!mola) continue;
+        const inp = tr.querySelector('input[name^="mpid_"]') as HTMLInputElement | null;
+        if (!inp) continue;
+        const produto = (cells[4]?.textContent ?? cells[2]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+        const dispText = (cells[5]?.textContent ?? cells[3]?.textContent ?? '').replace(/\D/g, '');
+        const capText = (cells[6]?.textContent ?? cells[4]?.textContent ?? '').replace(/\D/g, '');
+        const disponivel = parseInt(dispText, 10);
+        const capMax = parseInt(capText, 10);
+        out.push({
+          mola,
+          mpid: inp.name,
+          produto,
+          disponivel: Number.isFinite(disponivel) ? disponivel : 0,
+          capMax: Number.isFinite(capMax) ? capMax : 0,
+          rowIndex: i,
+        });
+      }
+      return out;
+    });
+    writeFileSync(`${OUT_DIR}/inv-03-rows.json`, JSON.stringify(rows, null, 2));
+    console.log(`  ✓ ${rows.length} slots na tabela`);
+
+    // Salva estado ANTES (Disponível) pra Luís ver
+    for (const r of rows) {
+      beforeSnapshot.push({ slotPosition: r.mola, produto: r.produto, disponivel: r.disponivel });
+    }
+
+    // Seleciona funcionário Weverton — IMPORTANTE: ANTES de preencher inputs
+    // (pode resetar valores ao mudar funcionário)
+    const funcSel = page.locator('#funcionario').first();
+    const funcOpts = await funcSel.locator('option').allTextContents();
+    const funcIdx = funcOpts.findIndex((o) => new RegExp(funcionarioNome, 'i').test(o));
+    if (funcIdx < 0) {
+      return {
+        ok: false,
+        beforeSnapshot,
+        applied,
+        generalError: `funcionário "${funcionarioNome}" não achado (opções: ${funcOpts.join(', ')})`,
+      };
+    }
+    await funcSel.selectOption({ index: funcIdx });
+    await page.waitForTimeout(800);
+    console.log(`  ✓ funcionário = ${funcOpts[funcIdx]}`);
+
+    // Mapeia items recebidos por slot position (normalizado)
+    const itemBySlot = new Map<string, { qty: number | null; skip?: boolean }>();
+    for (const it of items) {
+      const norm = it.slotPosition.replace(/[^\d]/g, '');
+      itemBySlot.set(norm, { qty: it.qty, skip: it.skip });
+    }
+
+    // Preenche TODOS os inputs (regra do Luís: não pode deixar branco)
+    let filledFromWeverton = 0;
+    let repeatedDisponivel = 0;
+    for (const row of rows) {
+      const normMola = row.mola.replace(/[^\d]/g, '');
+      const item = itemBySlot.get(normMola);
+      let qtyToFill: number;
+      let source: 'weverton' | 'repeat-disponivel' | 'skip';
+      if (item && item.skip) {
+        qtyToFill = row.disponivel;
+        source = 'skip';
+      } else if (item && typeof item.qty === 'number' && item.qty >= 0) {
+        qtyToFill = item.qty;
+        source = 'weverton';
+        filledFromWeverton++;
+      } else {
+        // Weverton não mandou — repete o disponível atual
+        qtyToFill = row.disponivel;
+        source = 'repeat-disponivel';
+        repeatedDisponivel++;
+      }
+      applied.push({ slotPosition: row.mola, qtyApplied: qtyToFill, source });
+
+      try {
+        const input = page.locator(`input[name="${row.mpid}"]`).first();
+        await input.fill(String(qtyToFill));
+      } catch (e) {
+        console.warn(`  ⚠️ slot ${row.mola}: falhou ao preencher (${e instanceof Error ? e.message : e})`);
+      }
+    }
+    console.log(`  ✓ preenchidos · ${filledFromWeverton} do Weverton, ${repeatedDisponivel} repetidos do "Disponível"`);
+    await page.screenshot({ path: `${OUT_DIR}/inv-04-filled.png`, fullPage: true });
+
+    // Click em Salvar — tenta múltiplos selectors (button, input, a)
+    const saveCandidates = [
+      'button[name="save"]',
+      'input[name="save"]',
+      'button:has-text("Salvar")',
+      'input[type="submit"][value="Salvar"]',
+      'a:has-text("Salvar")',
+      'button.btn-primary:has-text("Salvar")',
+      'button[type="submit"]:has-text("Salvar")',
+    ];
+    let saveBtn = null;
+    for (const sel of saveCandidates) {
+      const candidate = page.locator(sel).first();
+      if (await candidate.isVisible({ timeout: 1_000 }).catch(() => false)) {
+        saveBtn = candidate;
+        console.log(`  ✓ botão Salvar achado: ${sel}`);
+        break;
+      }
+    }
+    if (!saveBtn) {
+      // Dump html dos botões visíveis pra debug
+      const btnDump = await page.evaluate(() => {
+        const out: Array<{ tag: string; text: string; type: string; name: string; class: string }> = [];
+        const els = document.querySelectorAll('button, input[type="submit"], a.btn');
+        for (let i = 0; i < els.length; i++) {
+          const e = els[i] as HTMLElement;
+          if ((e as HTMLElement).offsetParent === null) continue;
+          out.push({
+            tag: e.tagName.toLowerCase(),
+            text: (e.textContent ?? (e as HTMLInputElement).value ?? '').trim().slice(0, 40),
+            type: (e as HTMLInputElement).type ?? '',
+            name: (e as HTMLInputElement).name ?? '',
+            class: e.className.slice(0, 60),
+          });
+        }
+        return out;
+      });
+      writeFileSync(`${OUT_DIR}/inv-buttons-dump.json`, JSON.stringify(btnDump, null, 2));
+      return { ok: false, beforeSnapshot, applied, generalError: `botão Salvar não achado (${btnDump.length} botões visíveis, dump em inv-buttons-dump.json)` };
+    }
+    await saveBtn.click({ force: true });
+    console.log(`  → Salvando…`);
+    await page.waitForTimeout(3_500);
+    await page.screenshot({ path: `${OUT_DIR}/inv-05-after-save.png`, fullPage: true });
+
+    // Vendtef pode mostrar modal de confirmação OU já redirecionar
+    // Confirma se houver modal
+    const confirmBtn = page
+      .locator('.modal.in button:has-text("Sim"), .modal.show button:has-text("Confirmar"), .modal.in button.btn-primary, .modal.show button.btn-primary')
+      .first();
+    if (await confirmBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await confirmBtn.click({ force: true });
+      console.log(`  → Confirmação clicada`);
+      await page.waitForTimeout(2_500);
+      await page.screenshot({ path: `${OUT_DIR}/inv-06-confirmed.png`, fullPage: true });
+    }
+
+    // Verifica sucesso: ou recarregou pra lista de operações, ou alguma msg de sucesso
+    const successMsg = await page.locator('.alert-success, [class*="success"]:visible').first().textContent({ timeout: 2_000 }).catch(() => null);
+    const finalUrl = page.url();
+    console.log(`  ✓ URL final: ${finalUrl}${successMsg ? ` · msg: ${successMsg.slice(0, 80)}` : ''}`);
+
+    return { ok: true, beforeSnapshot, applied };
+  } catch (err) {
+    console.error('[runInventarioMaquina]', err);
+    await page.screenshot({ path: `${OUT_DIR}/inv-99-error.png`, fullPage: true }).catch(() => undefined);
+    return {
+      ok: false,
+      beforeSnapshot,
+      applied,
+      generalError: err instanceof Error ? err.message : String(err),
+    };
+  } finally {
+    await page.close().catch(() => undefined);
+    await ctx.close().catch(() => undefined);
+    await browser.close().catch(() => undefined);
+  }
+}
+
+/**
  * Roda APENAS swaps de produto no Vendtef (sem abastecer estoque).
  *
  * Usado quando Decision INVENTÁRIO foi aprovada com mudanças de skuId

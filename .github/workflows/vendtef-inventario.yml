@@ -1,0 +1,54 @@
+name: Vendtef inventário
+
+# Disparado pelo Vercel (src/app/decisions/actions.ts approveDecision) quando
+# Luís aprova uma Decision de inventário do Weverton. Roda Playwright pra
+# registrar a operação de Inventário no ERP Vendtef (Operações de Estoque >
+# Inventário), atualizando a qty real no sistema.
+#
+# Distinto do snapshot local (applyInventorySnapshot) que só atualiza o banco
+# do Vendetti — este vai no ERP de verdade.
+
+on:
+  workflow_dispatch:
+    inputs:
+      decision_id:
+        description: 'Decision ID (inventory mode)'
+        required: true
+        type: string
+  repository_dispatch:
+    types: [vendtef-inventario]
+
+jobs:
+  inventario:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DATABASE_URL: ${{ secrets.DATABASE_URL }}
+      AUTH_SECRET: ${{ secrets.AUTH_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run inventario
+        env:
+          HEADLESS: 'true'
+          DECISION_ID: ${{ github.event.inputs.decision_id || github.event.client_payload.decision_id }}
+        run: npm run vendtef:inventario-ci
+
+      - name: Upload debug artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendtef-inventario-${{ github.run_id }}
+          path: tmp/vendtef-abastecimento/
+          retention-days: 14
+          if-no-files-found: ignore
